@@ -1,7 +1,7 @@
 ---
-title: "CPLN 675 - Urban Growth Modeling, 2022"
-author: "Ken Steif, 2019. Eds. Michael Fichman & Jenna Epstein"
-date: "2/21/2022"
+title: "Predicting Urban Growth - Austin, TX"
+author: "Olivia Scalora, Hasa Reddy"
+date: "May 2022"
 output:
   html_document:
     toc: true
@@ -24,37 +24,21 @@ knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE)
      max-width: none;
   }
 
-
 </style>
-
-_This markdown is an updated version of a module written by Ken Steif in 2019. It's quite wordy - it was an unused chapter from his book. It has been updated to keep it aligned with current packages and the data sources have been updated for the course github. For the most part, the original text is still used here, but alterations, annotations and supplemental code are throughout._
-
-_This workflow will form the backbone of your fifth and final assignment for this class. You will build a growth model based on a binary logistic regression that predicts the probability of land cover change at a raster cell level over a specified interval as a function of a) Existing land cover, b) The location of infrastructure and c) Demographic and economic spatial variables._
-
-_While we have used logistic regression to model spatial phenomena like flooding before, this workflow is different in that we wrangle raster data in R rather than doing it in ArcGIS. You do not need to understand the code in full detail, but rather, you should understand what it does operationally, and think about how you can plug in new data from a different time window, in a different geographic context._
-
-_Michael Fichman, April, 2022_
-
 
 # 1. Introduction
 
-Regional urban development is an emergent outcome resulting from the autonomous decisions of many different agents, including developers, real estate buyers and tenants as well as planners and regulators. Each of these groups optimize for a different set of bottom lines. Developers seek profit, buying land at a low price, improving on that land, and selling it at a premium. Households and firms consume housing and commercial real estate balancing price constraints with access to amenities and customers, respectively.
+*Regional urban development is an emergent outcome resulting from the autonomous decisions of many different agents, including developers, real estate buyers and tenants as well as planners and regulators. Each of these groups optimize for a different set of bottom lines. Developers seek profit, buying land at a low price, improving on that land, and selling it at a premium. Households and firms consume housing and commercial real estate balancing price constraints with access to amenities and customers, respectively.*
 
-Planners regulate development by trading-off economic growth with the mitigation of negative externalities toward the goal of economic and environmental sustainability. Houston, the focus of this chapter, is a case study in managing these trade-offs. A sprawling Metropolitan area larger than the state of New Jersey, Houston’s _laissez-faire_ approach to planning was exploited in the wake of Hurricane Harvey which ultimately cost the region $125 billion. Out of concern for either safety, economic necessity or both, climate change is forcing cities like Houston to reconsider the role of land use planning.
+*Planners regulate development by trading-off economic growth with the mitigation of negative externalities toward the goal of economic and environmental sustainability. Houston, the focus of this chapter, is a case study in managing these trade-offs. A sprawling Metropolitan area larger than the state of New Jersey, Houston’s _laissez-faire_ approach to planning was exploited in the wake of Hurricane Harvey which ultimately cost the region $125 billion. Out of concern for either safety, economic necessity or both, climate change is forcing cities like Houston to reconsider the role of land use planning.*
 
-Land use planning that is both economically productive and sustainable requires both supply and demand-side insights. Specifically, the Planner must understand future demand for development and how that demand contrasts with the supply of environmentally sensitive land. The goal of this chapter is to model this interplay.
+*Land use planning that is both economically productive and sustainable requires both supply and demand-side insights. Specifically, the Planner must understand future demand for development and how that demand contrasts with the supply of environmentally sensitive land. The goal of this chapter is to model this interplay.*
 
-The next section wrangles a host of datasets including, Land Cover and Land Cover Change from the USGS, Census demographics, and transportation. Spatial lag features are also engineered from the land cover change data hypothesizing that the time/space scale of development between 2000 and 2010 can help predict new development in 2020.
+*The next section wrangles a host of datasets including, Land Cover and Land Cover Change from the USGS, Census demographics, and transportation. Spatial lag features are also engineered from the land cover change data hypothesizing that the time/space scale of development between 2000 and 2010 can help predict new development in 2020.*
 
-Exploratory analysis is undertaken to investigate the relationship between development and the aforementioned features. Findings then motivate the estimation of a geospatial predictive model trained on new development between 2001 and 2011. Those dynamics are then harnessed to predict Development_Demand for 2020 - predictions interpreted as the probability of new development here. The goal is not to create the most accurate model, but to demonstrate the role for geospatial machine learning in the land use modeling process.
+*Exploratory analysis is undertaken to investigate the relationship between development and the aforementioned features. Findings then motivate the estimation of a geospatial predictive model trained on new development between 2001 and 2011. Those dynamics are then harnessed to predict Development_Demand for 2020 - predictions interpreted as the probability of new development here. The goal is not to create the most accurate model, but to demonstrate the role for geospatial machine learning in the land use modeling process.*
 
-Once predictions are validated for their accuracy and spatial generalizability, we evaluate their confluence with environmentally sensitive land in counties throughout the region, with particular emphasis on landscape fragmentation. The final section uses predictions to ‘allocate’ new development across to places where growth can have an economic impact without impeding sustainability goals.
-
-# 1.2. Setup
-
-Below we load the libraries needed for the analysis as well as a `mapTheme` and `plotTheme`. A set of palette colors are also specified.
-
-_MF Note: This chunk differs from the original markdown in a few ways. First, the library `igraph` is now needed. Second, the `mapTheme` and `plotTheme` calls are altered to reflect the default styles we have been using this semester._
+*Once predictions are validated for their accuracy and spatial generalizability, we evaluate their confluence with environmentally sensitive land in counties throughout the region, with particular emphasis on landscape fragmentation. The final section uses predictions to ‘allocate’ new development across to places where growth can have an economic impact without impeding sustainability goals.*
 
 ```{r load_packages, message=FALSE, warning=FALSE, results = "hide"}
 library(tidyverse)
@@ -117,12 +101,6 @@ palette10 <- c("#f7fcf0","#e0f3db","#ccebc5","#a8ddb5","#7bccc4",
                "#4eb3d3","#2b8cbe","#0868ac","#084081","#f7fcf0")
 ```
 
-We also include several helper functions. `quintilesBreaks` takes a dataframe and a column and outputs the quintiles breaks, helping shorten the below `ggplot` calls.
-
-It takes longer to `ggplot` a polygon fishnet with `geom_sf` than it does to plot `geom_point`. To cut down on plotting time, the `xyC` (for ‘XY Coordinates’) takes a fishnet `sf` and converts it to a dataframe of grid cell centroid coordinates.
-
-`rast` is a function allowing us to quickly plot raster values in `ggplot`.
-
 ```{r, warning = FALSE, message = FALSE}
 #this function converts a column in to quintiles. It is used for mapping.
 quintileBreaks <- function(df,variable) {
@@ -173,18 +151,36 @@ Several raster layers have been provided for this analysis:
 Note that `lc_change` is projected as `NAD 1983 StatePlane Texas South FIPS 4205 Feet`. The original land cover raster is at a 30 meter by 30 meter resolution. The rasters provided are ultimately resampled up to 4000 feet by 4000 feet. The Houston metro area is quite large at roughly 10,000 square meters (`st_area(houstonMSA) * 3.58701e-8`). The original 30 by 30 meter data has nearly 58 million grid cells. A vector fishnet dataset of this size would be too computationally intensive. By resampling we gain some computational efficiency but loose some accuracy. Nevertheless, this approach works well for educational purposes.
 
 ```{r load_data, warning = FALSE, message = FALSE, results = "hide"}
-houstonMSA <- 
-  st_read("https://raw.githubusercontent.com/mafichman/CPLN_675/main/Week_14_15/data/UGB_Chapter_data/houston_MSA.geojson") %>%
-  st_transform('ESRI:102741') # JE Note: added 'ESRI:' in front of projection
-
+# houstonMSA <- 
+#   st_read("https://raw.githubusercontent.com/mafichman/CPLN_675/main/Week_14_15/data/UGB_Chapter_data/houston_MSA.geojson") %>%
+#   st_transform('ESRI:102741') # JE Note: added 'ESRI:' in front of projection
+# 
 lc_change = raster("https://github.com/mafichman/CPLN_675/raw/main/Week_14_15/data/UGB_Chapter_data/resam4k.tif")
+
+
+Austin_county<- c("Williamson", "Travis","Bastrop", "Caldwell", "Hays")
+
+austinMSA <- 
+  st_read('~/UpennMUSA/Semester_2/CPLN_675/Urban_Growth_ATX/Austin_Data/Austin_MSA.geojson')%>%
+  st_transform('ESRI:102741')%>%
+  filter(name %in% Austin_county)%>%
+  st_union()
+
+st_write(austinMSA2, "austinMSA2.shp")
+
+austinMSA2 <- 
+  st_read('~/UpennMUSA/Semester_2/CPLN_675/Urban_Growth_ATX/Austin_Data/Austin_MSA.geojson')%>%
+  filter(name %in% Austin_county)%>%
+  st_union()
+austinMSA2 <- austinMSA2%>%
+  st_transform('EPSG:4326')
 ```
 
 We now plot the MSA.
 
 ```{r plot_msa, warning= FALSE, message= FALSE}
 ggplot() +
-  geom_sf(data=houstonMSA) +
+  geom_sf(data=austinMSA) +
   geom_raster(data=rast(lc_change) %>% na.omit %>% filter(value > 0), 
               aes(x,y,fill=as.factor(value))) +
   scale_fill_viridis(direction = -1, discrete=TRUE, name ="Land Cover\nChange") +
@@ -209,38 +205,39 @@ reclassMatrix
 Now `reclassify` and convert all 0’s to `NA`. We apply a name to the raster with `names`. This is done to make it faster to join raster to the fishnet below. You can see the frequency table of values with `freq(lc_change2)`. There are 655 areas that changed from underdeveloped to developed in the data.
 
 ```{r, warning = FALSE, message = FALSE}
-lc_change2 <- 
-  reclassify(lc_change,reclassMatrix)
-
-lc_change2[lc_change2 < 1] <- NA
-
-names(lc_change2) <- "lc_change"
-
-ggplot() +
-  geom_sf(data=houstonMSA) +
-  geom_raster(data=rast(lc_change2) %>% na.omit, 
-              aes(x,y,fill=as.factor(value))) +
-  scale_fill_viridis(discrete=TRUE, name ="Land Cover\nChange") + 
-  labs(title="Development Land Use Change") +
-  mapTheme
+# lc_change2 <- 
+#   reclassify(lc_change,reclassMatrix)
+# 
+# lc_change2[lc_change2 < 1] <- NA
+# 
+# names(lc_change2) <- "lc_change"
+# 
+# ggplot() +
+#   geom_sf(data=houstonMSA) +
+#   geom_raster(data=rast(lc_change2) %>% na.omit, 
+#               aes(x,y,fill=as.factor(value))) +
+#   scale_fill_viridis(discrete=TRUE, name ="Land Cover\nChange") + 
+#   labs(title="Development Land Use Change") +
+#   mapTheme
 ```
 
 Next, the fishnet is created at 4000 by 4000 foot resolution and subset it to the Houston MSA with `st_intersection`. 
 
 ```{r, warning = FALSE, message = FALSE}
-houstonMSA_fishnet <- 
-  st_make_grid(houstonMSA, 4000) %>%
+austinMSA_fishnet <- 
+  st_make_grid(st_sf(austinMSA), 4000) %>%
   st_sf()
 
-houstonMSA_fishnet <-
-  houstonMSA_fishnet[houstonMSA,]
+austinMSA_fishnet <-
+  austinMSA_fishnet[austinMSA,]
+
 ```
 
 The vector fishnet is then plotted. Note that this plot takes a bit of time to render because there are more than 18,000 polygons.
 
 ```{r, warning = FALSE, message= FALSE}
 ggplot() +
-  geom_sf(data=houstonMSA_fishnet) +
+  geom_sf(data=austinMSA_fishnet) +
   labs(title="Fishnet, 4000 Foot Resolution") +
   mapTheme
 ```
@@ -386,12 +383,28 @@ Recall, you will need a census API key to download the census data which must be
 _MF Note: In your assignment, you will be using a different timeframe, and therefore you will use ACS data rather than decennial census data. Look at the materials from week 5 (Intro to SF and Tidyverse) and the Intro to R for Planners text to see how `get_acs` can be used to replace `get_decennial` in your workflow._
 
 ```{r, warning = FALSE, message = FALSE, results = "hide"}
-houstonPop00 <- 
-  get_decennial(geography = "tract", variables = "P001001", year = 2000,
+
+B01003_001
+
+
+vars <- load_variables(year = 2009,
+                      dataset = "acs5",
+                      cache = TRUE)
+
+AustinPop_09 <- 
+  get_acs(geography = "tract", variables = "B01003_001", year = 2009,
                 state = 48, geometry = TRUE, 
-                county=c("Harris COunty","San Jacinto","Montgomery","Liberty","Waller",
-                         "Austin","Chambers","Fort Bend","Brazoria","Galveston")) %>%
-  rename(pop_2000 = value) %>%
+                county=c("Williamson", "Travis","Bastrop", "Caldwell", "Hays")) %>%
+  dplyr::select( -NAME, -moe) %>%
+  spread(variable, estimate) 
+  rename(pop_2009 = Variable) %>%
+  st_transform(st_crs(houstonMSA_fishnet))
+
+AustinPop_19 <- 
+  get_decennial(geography = "tract", variables = "P001001", year = 2019,
+                state = 48, geometry = TRUE, 
+                county=c("Williamson", "Travis","Bastrop", "Caldwell", "Hays")) %>%
+  rename(pop_2019 = value) %>%
   st_transform(st_crs(houstonMSA_fishnet))
 ```
 

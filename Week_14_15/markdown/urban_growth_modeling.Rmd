@@ -72,6 +72,7 @@ library(pscl)
 library(plotROC) 
 library(ggrepel)
 library(pROC)
+library(rgdal)
 library(grid)
 library(gridExtra)
 library(viridis)
@@ -178,11 +179,17 @@ houstonMSA <-
   st_transform('ESRI:102741') # JE Note: added 'ESRI:' in front of projection
 
 lc_change = raster("https://github.com/mafichman/CPLN_675/raw/main/Week_14_15/data/UGB_Chapter_data/resam4k.tif")
+
+austinMSA <- 
+  st_read()%>%
+  st_transform('ESRI:102741')
+
 ```
 
 We now plot the MSA.
 
 ```{r plot_msa, warning= FALSE, message= FALSE}
+
 ggplot() +
   geom_sf(data=houstonMSA) +
   geom_raster(data=rast(lc_change) %>% na.omit %>% filter(value > 0), 
@@ -191,6 +198,8 @@ ggplot() +
   labs(title = "Land Cover Change, 2000-2010") +
   mapTheme +
   theme(legend.direction="horizontal")
+
+
 ```
 
 Next, we reclassify the raster such that all the developed grid cell values receive a value of 1 and all other values receive a value of 0. This is done using a reclassify matrix. The matrix reads row by row. Row 1 says any grid cell ranging from 0 to 12 takes a value of 0; 13 or greater through 24, a value of 1; and all other values take 0.
@@ -386,13 +395,21 @@ Recall, you will need a census API key to download the census data which must be
 _MF Note: In your assignment, you will be using a different timeframe, and therefore you will use ACS data rather than decennial census data. Look at the materials from week 5 (Intro to SF and Tidyverse) and the Intro to R for Planners text to see how `get_acs` can be used to replace `get_decennial` in your workflow._
 
 ```{r, warning = FALSE, message = FALSE, results = "hide"}
-houstonPop00 <- 
-  get_decennial(geography = "tract", variables = "P001001", year = 2000,
+AustinPop_09 <- 
+  get_decennial(geography = "tract", variables = "P001001", year = 2009,
                 state = 48, geometry = TRUE, 
-                county=c("Harris COunty","San Jacinto","Montgomery","Liberty","Waller",
-                         "Austin","Chambers","Fort Bend","Brazoria","Galveston")) %>%
-  rename(pop_2000 = value) %>%
+                county=c("Williamson", "Travis","Bastrop", "Caldwell", "Hays")) %>%
+  rename(pop_2009 = value) %>%
   st_transform(st_crs(houstonMSA_fishnet))
+
+AustinPop_19 <- 
+  get_decennial(geography = "tract", variables = "P001001", year = 2019,
+                state = 48, geometry = TRUE, 
+                county=c("Williamson", "Travis","Bastrop", "Caldwell", "Hays")) %>%
+  rename(pop_2019 = value) %>%
+  st_transform(st_crs(houstonMSA_fishnet))
+
+
 ```
 
 Now data for 2010 is downloaded. In this instance, `st_buffer` is used to buffer the the tracts by -1ft. This is done because `tidycensus` appears to return geometries that are problematic when subjected to the area weighted interpolation function below. As done in previous chapters, a very small buffer is used to correct the geometries.

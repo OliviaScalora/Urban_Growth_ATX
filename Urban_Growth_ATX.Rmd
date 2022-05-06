@@ -28,19 +28,9 @@ knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE)
 
 # 1. Introduction
 
-*Regional urban development is an emergent outcome resulting from the autonomous decisions of many different agents, including developers, real estate buyers and tenants as well as planners and regulators. Each of these groups optimize for a different set of bottom lines. Developers seek profit, buying land at a low price, improving on that land, and selling it at a premium. Households and firms consume housing and commercial real estate balancing price constraints with access to amenities and customers, respectively.*
-
-*Planners regulate development by trading-off economic growth with the mitigation of negative externalities toward the goal of economic and environmental sustainability. Houston, the focus of this chapter, is a case study in managing these trade-offs. A sprawling Metropolitan area larger than the state of New Jersey, Houston’s _laissez-faire_ approach to planning was exploited in the wake of Hurricane Harvey which ultimately cost the region $125 billion. Out of concern for either safety, economic necessity or both, climate change is forcing cities like Houston to reconsider the role of land use planning.*
-
-*Land use planning that is both economically productive and sustainable requires both supply and demand-side insights. Specifically, the Planner must understand future demand for development and how that demand contrasts with the supply of environmentally sensitive land. The goal of this chapter is to model this interplay.*
-
-*The next section wrangles a host of datasets including, Land Cover and Land Cover Change from the USGS, Census demographics, and transportation. Spatial lag features are also engineered from the land cover change data hypothesizing that the time/space scale of development between 2000 and 2010 can help predict new development in 2020.*
-
-*Exploratory analysis is undertaken to investigate the relationship between development and the aforementioned features. Findings then motivate the estimation of a geospatial predictive model trained on new development between 2001 and 2011. Those dynamics are then harnessed to predict Development_Demand for 2020 - predictions interpreted as the probability of new development here. The goal is not to create the most accurate model, but to demonstrate the role for geospatial machine learning in the land use modeling process.*
-
-*Once predictions are validated for their accuracy and spatial generalizability, we evaluate their confluence with environmentally sensitive land in counties throughout the region, with particular emphasis on landscape fragmentation. The final section uses predictions to ‘allocate’ new development across to places where growth can have an economic impact without impeding sustainability goals.*
 
 ```{r load_packages, message=FALSE, warning=FALSE, results = "hide"}
+# install.packages("RCurl")
 library(tidyverse)
 library(sf)
 library(raster)
@@ -60,6 +50,8 @@ library(grid)
 library(gridExtra)
 library(viridis)
 library(igraph)
+library(RCurl)
+
 
 plotTheme <- theme(
   plot.title =element_text(size=12),
@@ -155,17 +147,14 @@ Note that `lc_change` is projected as `NAD 1983 StatePlane Texas South FIPS 4205
 
 #LC Change was pre processed in ArcGIS using 2008 and 2019 Land cover data 
 # Raster Calculator was used to retrieve raster cells changed from undeveloped to developed between 2008 and 2019
-lc_change = raster("~/UpennMUSA/Semester_2/CPLN_675/Urban_Growth_ATX/Austin_Data/urbn_grwth_08_19.tif")
-
-#counties that define Austin MSA
-Austin_county<- c("Williamson", "Travis","Bastrop", "Caldwell", "Hays")
+lc_change = raster("~/GitHub/Urban_Growth_ATX/Austin_Data/urbn_grwth_08_19.tif")
 
 #austinMSA is the extent of the study area (Austing Metropolitan Statistical Area)
 
 austinMSA <- 
-  st_read('~/UpennMUSA/Semester_2/CPLN_675/Urban_Growth_ATX/Austin_Data/Austin_MSA.geojson')%>%
+  st_read('~/GitHub/Urban_Growth_ATX/Austin_Data/Austin_MSA.geojson')%>%
   st_transform('ESRI:102741')%>%
-  filter(name %in% Austin_county)%>%
+  filter(name %in% c("Williamson", "Travis","Bastrop", "Caldwell", "Hays"))%>%
   st_union()
 
 ```
@@ -178,25 +167,9 @@ ggplot() +
   geom_raster(data=rast(lc_change) %>% na.omit %>% filter(value > 0), 
               aes(x,y,fill=as.factor(value))) +
   scale_fill_manual(values = "#ed6728", label = "Land Cover Change")+
-  labs(title = "Land Cover Change, 2000-2010") +
-  mapTheme +
-  theme(legend.direction="horizontal")
-```
-
-Next, we reclassify the raster such that all the developed grid cell values receive a value of 1 and all other values receive a value of 0. This is done using a reclassify matrix. The matrix reads row by row. Row 1 says any grid cell ranging from 0 to 12 takes a value of 0; 13 or greater through 24, a value of 1; and all other values take 0.
-
-```{r, warning = FALSE, message = FALSE}
-
-# Reclassification happened in arcGIS
-
-# reclassMatrix <- 
-#   matrix(c(
-#     0,12,0,
-#     12,24,1,
-#     24,Inf,0),
-#   ncol=3, byrow=T)
-# 
-# reclassMatrix
+  labs(title = "Land Cover Change, 2000-2010", 
+       fill = "") +
+  mapTheme
 ```
 
 Now `reclassify` and convert all 0’s to `NA`. We apply a name to the raster with `names`. This is done to make it faster to join raster to the fishnet below. You can see the frequency table of values with `freq(lc_change2)`. There are 655 areas that changed from underdeveloped to developed in the data.
@@ -254,12 +227,18 @@ changePoints <-
   as.data.frame() %>%
   st_as_sf(coords = c("x", "y"), crs = st_crs(austinMSA_fishnet))
 
-fishnet_join <- 
-  aggregate(changePoints, austinMSA_fishnet, sum) 
+#Join takes a long time to run - for markdown, we store the output and read it back in
+# fishnet_join <- 
+#   aggregate(changePoints, austinMSA_fishnet, sum) 
+# 
+# st_write(fishnet_join, "Austin_Data/fishnet_join.shp")
+fishnet_join <- st_read("~/GitHub/Urban_Growth_ATX/Austin_Data/fishnet_join.shp")
 
+#threshold - 100 pixels or more indicate urban growth. raster resolution is much smaller than fishnet cell size
 fishnet <- fishnet_join%>%
-  mutate(lc_change = ifelse(urbn_grwth_08_19 == 0,0,1),
-         lc_change = as.factor(lc_change))
+  mutate(lc_change = ifelse(u__08_1 > 100,1,0),
+         lc_change = as.factor(lc_change))%>%
+  dplyr::select(lc_change)
 
 ggplot() +
   geom_sf(data=austinMSA) +
@@ -281,36 +260,40 @@ It is reasonable to hypothesize that the propensity of new development is a func
 
 ```{r, warning = FALSE, message = FALSE}
 
-fishnet_fid<- st_read('~/UpennMUSA/Semester_2/CPLN_675/Urban_Growth_ATX/Austin_Data/Fishnet.shp')
-fishnet <- cbind(fishnet,fishnet_fid%>%st_drop_geometry)%>%
-  dplyr::select(-urbn_grwth_08_19)%>%
-  rename(FID = FID_1)
+lc_2008 <- raster("~/GitHub/Urban_Growth_ATX/Austin_Data/LC_08_rast.tif")
+
+#read in fishnet output created from arcGIS to have FID column
+# fishnet_fid<- st_read('~/GitHub/Urban_Growth_ATX/Austin_Data/Fishnet.shp')
+# fishnet <- cbind(fishnet,fishnet_fid%>%st_drop_geometry)%>%
+#   dplyr::select(-u__08_1)%>%
+#   rename(FID = FID_1)
 
 #Read LC_08 in, rename majority landcover type
-LC_08<- read.csv('~/UpennMUSA/Semester_2/CPLN_675/Urban_Growth_ATX/Austin_Data/LC_08.csv')%>%
-  dplyr::select(FID, MAJORITY)%>%
-  rename(LC_08 = MAJORITY)
+# LC_08<- read.csv('~/GitHub/Urban_Growth_ATX/Austin_Data/LC_08.csv')%>%
+#   dplyr::select(FID, MAJORITY)%>%
+#   rename(LC_08 = MAJORITY)
 
-#Read LC_08 in, rename majority landcover type
-LC_19<- read.csv('~/UpennMUSA/Semester_2/CPLN_675/Urban_Growth_ATX/Austin_Data/LC_19.csv')%>%
-  dplyr::select(FID, MAJORITY)%>%
-  rename(LC_19 = MAJORITY)
+#Read LC_19 in, rename majority landcover type
+# i dont know if we need this yet
+# LC_19<- read.csv('~/GitHub/Urban_Growth_ATX/Austin_Data/LC_19.csv')%>%
+#   dplyr::select(FID, MAJORITY)%>%
+#   rename(LC_19 = MAJORITY)
+# LC_19 <- fishnet%>%left_join(., LC_19, by = 'FID')
 
-LC_08 <- fishnet%>%left_join(., LC_08, by = 'FID')
-LC_19 <- fishnet%>%left_join(., LC_19, by = 'FID')
+# join landcover values from 2008 to fishnet
+# fishnet <- fishnet%>%left_join(., LC_08, by = 'FID')
 
 #Read Land Cover CSV and join to fishnet 
 # Landcover graphics made in ArcGIS
 
-# 
-# ggplot() +
-#   geom_sf(data=austinMSA) +
-#   geom_raster(data=rast(test) %>% na.omit %>% filter(value > 0), 
-#               aes(x,y,fill=as.factor(value))) +
-#   scale_fill_viridis(discrete=TRUE, name ="") +
-#   labs(title = "Land Cover, 2001") +
-#   mapTheme +
-#   theme(legend.direction="horizontal")
+ggplot() +
+  geom_sf(data=austinMSA) +
+  geom_raster(data=rast(lc_2008) %>% na.omit %>% filter(value > 0),
+              aes(x,y,fill=as.factor(value))) +
+  scale_fill_viridis(discrete=TRUE, name ="") +
+  labs(title = "Land Cover, 2001") +
+  mapTheme +
+  theme(legend.direction="horizontal")
 ```
 
 The table below shows the approach taken to recoded existing land cover codes into the categories used in our analysis. In the code block below new rasters are generated and `names` are applied. Naming ensures that when the raster is integrated with the fishnet, the column reflects the appropriate raster.
@@ -325,12 +308,21 @@ The table below shows the approach taken to recoded existing land cover codes in
 | Water | Water |
 
 ```{r, warning = FALSE, message = FALSE}
-developed <- lc_2001 == 21 | lc_2001 == 22 | lc_2001 == 23 | lc_2001 == 24
-forest <- lc_2001 == 41 | lc_2001 == 42 | lc_2001 == 43 
-farm <- lc_2001 == 81 | lc_2001 == 82 
-wetlands <- lc_2001 == 90 | lc_2001 == 95 
-otherUndeveloped <- lc_2001 == 52 | lc_2001 == 71 | lc_2001 == 31 
-water <- lc_2001 == 11
+
+# fishnet<- fishnet%>%
+#   mutate(LC_08_reclass = case_when(LC_08 == 21 | LC_08 == 22 |LC_08 == 23 |LC_08 == 24~ "developed", 
+#                            LC_08 == 41 | LC_08 == 42 |LC_08 == 43 ~ "forest",
+#                            LC_08 == 81 | LC_08 == 82 ~ "farm", 
+#                            LC_08 == 90 | LC_08 == 95 ~ "wetlands", 
+#                            LC_08 == 52 | LC_08 == 71 |LC_08 == 31 ~ "otherUndeveloped",
+#                            LC_08 == 11 ~ "water"))
+
+developed <- lc_2008 == 21 | lc_2008 == 22 | lc_2008 == 23 | lc_2008 == 24
+forest <- lc_2008 == 41 | lc_2008 == 42 | lc_2008 == 43 
+farm <- lc_2008 == 81 | lc_2008 == 82 
+wetlands <- lc_2008 == 90 | lc_2008 == 95 
+otherUndeveloped <- lc_2008 == 52 | lc_2008 == 71 | lc_2008 == 31 
+water <- lc_2008 == 11
 
 names(developed) <- "developed"
 names(forest) <- "forest"
@@ -378,7 +370,7 @@ Note the inclusion of `st_cast` here which convert all geometries to `POLYGON`. 
 theRasterList <- c(developed,forest,farm,wetlands,otherUndeveloped,water)
 
 aggregatedRasters <-
-  aggregateRaster(theRasterList, houstonMSA_fishnet) %>%
+  aggregateRaster(theRasterList, austinMSA_fishnet) %>%
   dplyr::select(developed,forest,farm,wetlands,otherUndeveloped,water) %>%
   mutate_if(is.numeric,as.factor)
 
@@ -388,13 +380,13 @@ aggregatedRasters %>%
   mutate(X = xyC(.)$x,
          Y = xyC(.)$y) %>%
   ggplot() +
-    geom_sf(data=houstonMSA) +
+    geom_sf(data=austinMSA) +
     geom_point(aes(X,Y, colour=as.factor(value))) +
     facet_wrap(~var) +
     scale_colour_manual(values = palette2,
                         labels=c("Other","Land Cover"),
                         name = "") +
-    labs(title = "Land Cover Types, 2001",
+    labs(title = "Land Cover Types, 2008",
          subtitle = "As fishnet centroids") +
    mapTheme
 ```
@@ -411,7 +403,7 @@ _MF Note: In your assignment, you will be using a different timeframe, and there
 
 B01003_001
 
-
+census_api_key()
 vars <- load_variables(year = 2009,
                       dataset = "acs5",
                       cache = TRUE)
@@ -423,7 +415,7 @@ AustinPop_09 <-
   dplyr::select( -NAME, -moe) %>%
   spread(variable, estimate) 
   rename(pop_2009 = Variable) %>%
-  st_transform(st_crs(houstonMSA_fishnet))
+  st_transform(st_crs(austinMSA_fishnet))
 
 AustinPop_19 <- 
   get_decennial(geography = "tract", variables = "P001001", year = 2019,

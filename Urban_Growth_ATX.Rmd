@@ -52,6 +52,7 @@ library(viridis)
 library(igraph)
 library(RCurl)
 
+options(scipen = 100)
 
 plotTheme <- theme(
   plot.title =element_text(size=12),
@@ -150,11 +151,11 @@ Note that `lc_change` is projected as `NAD 1983 StatePlane Texas South FIPS 4205
 lc_change = raster("~/GitHub/Urban_Growth_ATX/Austin_Data/urbn_grwth_08_19.tif")
 
 #austinMSA is the extent of the study area (Austing Metropolitan Statistical Area)
-
+studyAreaCounties<- c("Williamson", "Travis","Bastrop", "Caldwell", "Hays")
 austinMSA <- 
   st_read('~/GitHub/Urban_Growth_ATX/Austin_Data/Austin_MSA.geojson')%>%
   st_transform('ESRI:102741')%>%
-  filter(name %in% c("Williamson", "Travis","Bastrop", "Caldwell", "Hays"))%>%
+  filter(name %in%studyAreaCounties)%>%
   st_union()
 
 ```
@@ -252,15 +253,15 @@ ggplot() +
 ```
 
 
-## 2.3. Land Cover in 2001
+## 2.3. Land Cover in 2009
 
 It is reasonable to hypothesize that the propensity of new development is a function of existing land cover categories. In this section we identify these other land cover categories from 2001 and integrate each with the fishnet.
 
-![Land Cover 2008](~/UpennMUSA/Semester_2/CPLN_675/Urban_Growth_ATX/Graphics/LC_08.png)
+![Land Cover 2009](~/UpennMUSA/Semester_2/CPLN_675/Urban_Growth_ATX/Graphics/LC_08.png)
 
 ```{r, warning = FALSE, message = FALSE}
 
-lc_2008 <- raster("~/GitHub/Urban_Growth_ATX/Austin_Data/LC_08_rast.tif")
+lc_2009 <- raster("~/GitHub/Urban_Growth_ATX/Austin_Data/LC_08_rast.tif")
 
 #read in fishnet output created from arcGIS to have FID column
 # fishnet_fid<- st_read('~/GitHub/Urban_Growth_ATX/Austin_Data/Fishnet.shp')
@@ -288,10 +289,10 @@ lc_2008 <- raster("~/GitHub/Urban_Growth_ATX/Austin_Data/LC_08_rast.tif")
 
 ggplot() +
   geom_sf(data=austinMSA) +
-  geom_raster(data=rast(lc_2008) %>% na.omit %>% filter(value > 0),
+  geom_raster(data=rast(lc_2009) %>% na.omit %>% filter(value > 0),
               aes(x,y,fill=as.factor(value))) +
   scale_fill_viridis(discrete=TRUE, name ="") +
-  labs(title = "Land Cover, 2001") +
+  labs(title = "Land Cover, 2008") +
   mapTheme +
   theme(legend.direction="horizontal")
 ```
@@ -317,12 +318,12 @@ The table below shows the approach taken to recoded existing land cover codes in
 #                            LC_08 == 52 | LC_08 == 71 |LC_08 == 31 ~ "otherUndeveloped",
 #                            LC_08 == 11 ~ "water"))
 
-developed <- lc_2008 == 21 | lc_2008 == 22 | lc_2008 == 23 | lc_2008 == 24
-forest <- lc_2008 == 41 | lc_2008 == 42 | lc_2008 == 43 
-farm <- lc_2008 == 81 | lc_2008 == 82 
-wetlands <- lc_2008 == 90 | lc_2008 == 95 
-otherUndeveloped <- lc_2008 == 52 | lc_2008 == 71 | lc_2008 == 31 
-water <- lc_2008 == 11
+developed <- lc_2009 == 21 | lc_2009 == 22 | lc_2009 == 23 | lc_2009 == 24
+forest <- lc_2009 == 41 | lc_2009 == 42 | lc_2009 == 43 
+farm <- lc_2009 == 81 | lc_2009 == 82 
+wetlands <- lc_2009 == 90 | lc_2009 == 95 
+otherUndeveloped <- lc_2009 == 52 | lc_2009 == 71 | lc_2009 == 31 
+water <- lc_2009 == 11
 
 names(developed) <- "developed"
 names(forest) <- "forest"
@@ -386,7 +387,7 @@ aggregatedRasters %>%
     scale_colour_manual(values = palette2,
                         labels=c("Other","Land Cover"),
                         name = "") +
-    labs(title = "Land Cover Types, 2008",
+    labs(title = "Land Cover Types, 2009",
          subtitle = "As fishnet centroids") +
    mapTheme
 ```
@@ -401,9 +402,8 @@ _MF Note: In your assignment, you will be using a different timeframe, and there
 
 ```{r, warning = FALSE, message = FALSE, results = "hide"}
 
-B01003_001
+census_api_key('d5e25f48aa48bf3f0766baab06d59402ea032067')
 
-census_api_key()
 vars <- load_variables(year = 2009,
                       dataset = "acs5",
                       cache = TRUE)
@@ -413,29 +413,24 @@ AustinPop_09 <-
                 state = 48, geometry = TRUE, 
                 county=c("Williamson", "Travis","Bastrop", "Caldwell", "Hays")) %>%
   dplyr::select( -NAME, -moe) %>%
-  spread(variable, estimate) 
-  rename(pop_2009 = Variable) %>%
+  spread(variable, estimate)%>% 
+  rename(pop_2009 = B01003_001) %>%
   st_transform(st_crs(austinMSA_fishnet))
 
-AustinPop_19 <- 
-  get_decennial(geography = "tract", variables = "P001001", year = 2019,
-                state = 48, geometry = TRUE, 
-                county=c("Williamson", "Travis","Bastrop", "Caldwell", "Hays")) %>%
-  rename(pop_2019 = value) %>%
-  st_transform(st_crs(houstonMSA_fishnet))
+
 ```
 
 Now data for 2010 is downloaded. In this instance, `st_buffer` is used to buffer the the tracts by -1ft. This is done because `tidycensus` appears to return geometries that are problematic when subjected to the area weighted interpolation function below. As done in previous chapters, a very small buffer is used to correct the geometries.
 
 ```{r, warning = FALSE, message = FALSE, results = "hide"}
-houstonPop10 <- 
-  get_decennial(geography = "tract", variables = "P001001", year = 2010,
-                state = 48, geometry = TRUE,
-                county=c("Harris COunty","San Jacinto","Montgomery","Liberty","Waller",
-                         "Austin","Chambers","Fort Bend","Brazoria","Galveston")) %>%
-  rename(pop_2010 = value) %>%
-  st_transform(st_crs(houstonMSA_fishnet)) %>%
-  st_buffer(-1)
+AustinPop_19 <- 
+  get_acs(geography = "tract", variables = "B01003_001", year = 2019,
+                state = 48, geometry = TRUE, 
+                county=c("Williamson", "Travis","Bastrop", "Caldwell", "Hays")) %>%
+  dplyr::select( -NAME, -moe) %>%
+  spread(variable, estimate)%>% 
+  rename(pop_2019 = B01003_001) %>%
+  st_transform(st_crs(austinMSA_fishnet))
 ```
 
 Both years of census data are then plotted.
@@ -444,19 +439,19 @@ Both years of census data are then plotted.
 ```{r, warning = FALSE, message = FALSE, fig.height= 8, fig.width= 11}
 grid.arrange(
 ggplot() +
-  geom_sf(data = houstonPop00, aes(fill=factor(ntile(pop_2000,5))), colour=NA) +
+  geom_sf(data = AustinPop_09, aes(fill=factor(ntile(pop_2009,5))), colour=NA) +
   scale_fill_manual(values = palette5,
-                    labels=quintileBreaks(houstonPop00,"pop_2000"),
+                    labels=quintileBreaks(AustinPop_09,"pop_2009"),
                    name="Quintile\nBreaks") +
-  labs(title="Population, Houston MSA: 2000") +
+  labs(title="Population, Houston MSA: 2009") +
   mapTheme,
 
 ggplot() +
-  geom_sf(data = houstonPop10, aes(fill=factor(ntile(pop_2010,5))), colour=NA) +
+  geom_sf(data = AustinPop_19, aes(fill=factor(ntile(pop_2019,5))), colour=NA) +
   scale_fill_manual(values = palette5,
-                    labels=quintileBreaks(houstonPop10,"pop_2010"),
+                    labels=quintileBreaks(AustinPop_19,"pop_2019"),
                    name="Quintile\nBreaks") +
-  labs(title="Population, Houston MSA: 2010") +
+  labs(title="Population, Houston MSA: 2019") +
   mapTheme, ncol=2)
 ```
 </div>
@@ -472,36 +467,36 @@ It would be helpful for you to spend some time running through each code block l
 _MF Note: This code chunk has notable differences from the original markdown. Most notably - the `rownames_to_column` function has been inserted into the dplyr chain as a way to assign out the fishnet cell ID from the houstonMSA_fishnet to the interpolated data. This allows it to be joined to the fishnet by it's unique ID. The `st_interpolate_aw` function removes the unique ID._
 
 ```{r, warning = FALSE, message = FALSE}
-houstonMSA_fishnet <-
-  houstonMSA_fishnet %>%
+austinMSA_fishnet <-
+  austinMSA_fishnet %>%
   rownames_to_column("fishnetID") %>% 
   mutate(fishnetID = as.numeric(fishnetID)) %>%
   dplyr::select(fishnetID)
 
-fishnetPopulation00 <-
-  st_interpolate_aw(houstonPop00["pop_2000"], houstonMSA_fishnet, extensive=TRUE) %>%
+fishnetPopulation09 <-
+  st_interpolate_aw(AustinPop_09["pop_2009"], austinMSA_fishnet, extensive=TRUE) %>%
   as.data.frame(.) %>%
   rownames_to_column(var = "fishnetID") %>%
-  left_join(houstonMSA_fishnet %>%
+  left_join(austinMSA_fishnet %>%
               mutate(fishnetID = as.character(fishnetID)),
             ., by=c("fishnetID"='fishnetID')) %>% 
-  mutate(pop_2000 = replace_na(pop_2000,0)) %>%
-  dplyr::select(pop_2000)
+  mutate(pop_2009 = replace_na(pop_2009,0)) %>%
+  dplyr::select(pop_2009)
 
-fishnetPopulation10 <-
-  st_interpolate_aw(houstonPop10["pop_2010"],houstonMSA_fishnet, extensive=TRUE) %>%
+fishnetPopulation19 <-
+  st_interpolate_aw(AustinPop_19["pop_2019"],austinMSA_fishnet, extensive=TRUE) %>%
   as.data.frame(.) %>%
   rownames_to_column(var = "fishnetID") %>%
-  left_join(houstonMSA_fishnet %>%
+  left_join(austinMSA_fishnet %>%
               mutate(fishnetID = as.character(fishnetID)),
             ., by=c("fishnetID"='fishnetID')) %>% 
-  mutate(pop_2010 = replace_na(pop_2010,0)) %>%
-  dplyr::select(pop_2010)
+  mutate(pop_2019 = replace_na(pop_2019,0)) %>%
+  dplyr::select(pop_2019)
 
 fishnetPopulation <- 
-  cbind(fishnetPopulation00,fishnetPopulation10) %>%
-  dplyr::select(pop_2000,pop_2010) %>%
-  mutate(pop_Change = pop_2010 - pop_2000)
+  cbind(fishnetPopulation09,fishnetPopulation19) %>%
+  dplyr::select(pop_2009,pop_2019) %>%
+  mutate(pop_Change = pop_2019 - pop_2009)
 ```
 
 For comparison purposes, both the 2010 census tract geometries and the population weighted grid cells are plotted.
@@ -510,20 +505,20 @@ For comparison purposes, both the 2010 census tract geometries and the populatio
 ```{r, warning = FALSE, message = FALSE, fig.height = 8, fig.width= 11}
 grid.arrange(
 ggplot() +
-  geom_sf(data=houstonPop10, aes(fill=factor(ntile(pop_2010,5))),colour=NA) +
+  geom_sf(data=AustinPop_19, aes(fill=factor(ntile(pop_2019,5))),colour=NA) +
   scale_fill_manual(values = palette5,
-                    labels=substr(quintileBreaks(houstonPop10,"pop_2010"),1,4),
+                    labels=substr(quintileBreaks(AustinPop_19,"pop_2019"),1,4),
                    name="Quintile\nBreaks") +
-  labs(title="Population, Houston MSA: 2010",
+  labs(title="Population, Austin MSA: 2019",
        subtitle="Represented as tracts; Boundaries omitted") +
   mapTheme,
 
 ggplot() +
-  geom_sf(data=fishnetPopulation, aes(fill=factor(ntile(pop_2010,5))),colour=NA) +
+  geom_sf(data=fishnetPopulation, aes(fill=factor(ntile(pop_2019,5))),colour=NA) +
   scale_fill_manual(values = palette5,
-                   labels=substr(quintileBreaks(fishnetPopulation,"pop_2010"),1,4),
+                   labels=substr(quintileBreaks(fishnetPopulation,"pop_2019"),1,4),
                    name="Quintile\nBreaks") +
-  labs(title="Population, Houston MSA: 2010",
+  labs(title="Population, Austin MSA: 2019",
        subtitle="Represented as fishnet gridcells; Boundaries omitted") +
   mapTheme, ncol=2)
 ```
@@ -538,17 +533,17 @@ First highway vectors are downloaded from the Texas State open data website in `
 _MF Note: A notable change from the original markdown - these data have been hard-coded to a file endpoint. The original data referenced in the code can be found [here](https://opendata.arcgis.com/datasets/8b2f979d4ef24388a6a893019322e71c_0.geojson)_
 
 ```{r, warning = FALSE, message = FALSE, results = "hide"}
-houstonHighways <-
-  st_read("https://github.com/mafichman/CPLN_675/raw/main/Week_14_15/data/UGB_Chapter_data/houstonHighways.geojson") %>%
-  st_transform(st_crs(houstonMSA)) %>%
-  st_intersection(houstonMSA)
+austinHighways <-
+  st_read("~/GitHub/Urban_Growth_ATX/Austin_Data/Austin_Highways.geojson") %>%
+  st_transform(st_crs(austinMSA)) %>%
+  st_intersection(austinMSA)
 ```
 
 ```{r plot_highway, warning = FALSE, message= FALSE}
 ggplot() +
   geom_point(data=fishnet, 
              aes(x=xyC(fishnet)[,1], y=xyC(fishnet)[,2],colour=lc_change),size=1.5) +
-  geom_sf(data=houstonHighways) +
+  geom_sf(data=austinHighways) +
   scale_colour_manual(values = palette2,
                       labels=c("No Change","New Development")) +
   labs(title = "New Development and Highways",
@@ -563,34 +558,42 @@ First, the highway layer is converted to raster. This is done by creating an `em
 You may (but likely not) be interested in learning that `sp` is the older spatial data convention in R. Although `sf` is the new convention, raster/vector interactions still require `sp`. The `as` function converts.
 
 ```{r, warning = FALSE, message = FALSE}
-emptyRaster <- lc_change
-emptyRaster[] <- NA
 
-highway_raster <- 
-  as(houstonHighways,'Spatial') %>%
-  rasterize(.,emptyRaster)
+library(stringr)
+# st_distance to highways
+fishnet <- fishnet %>%
+  mutate(uniqueID = as.character(row_number()))
 
-highway_raster_distance <- distance(highway_raster)
-names(highway_raster_distance) <- "distance_highways"
+fishnet_centroid <- fishnet %>%
+  st_centroid()
 
-highwayPoints <-
-  rasterToPoints(highway_raster_distance) %>%
+highway_dist <- fishnet_centroid %>%
+  st_distance(austinHighways %>%
+                st_transform(st_crs(fishnet_centroid))) %>%
   as.data.frame() %>%
-  st_as_sf(coords = c("x", "y"), crs = st_crs(houstonMSA_fishnet))
+  mutate(uniqueID = as.character(row_number())) %>%
+  gather(-uniqueID, key = "variable", value = "value") %>%
+  dplyr::select(-variable) %>%
+  group_by(uniqueID) %>%
+ summarize(highway_dist = min(value))
 
-highwayPoints_fishnet <- 
-  aggregate(highwayPoints, houstonMSA_fishnet, mean) %>%
-  mutate(distance_highways = ifelse(is.na(distance_highways),0,distance_highways))
+highway_dist[c('num', 'str')] <- str_split_fixed(highway_dist$highway_dist, ' ', 2)
+highway_dist <-highway_dist%>%
+  mutate(highway_dist = as.numeric(num))%>%
+  dplyr::select(uniqueID, highway_dist)
+
+
+fishnet <- left_join(fishnet, highway_dist)
 
 ggplot() +
-  geom_sf(data=houstonMSA) +
-  geom_point(data=highwayPoints_fishnet, aes(x=xyC(highwayPoints_fishnet)[,1], 
-                                             y=xyC(highwayPoints_fishnet)[,2], 
-                 colour=factor(ntile(distance_highways,5))),size=1.5) +
+  geom_sf(data=austinMSA) +
+  geom_point(data=fishnet, aes(x=xyC(fishnet)[,1], 
+                                             y=xyC(fishnet)[,2], 
+                 colour=factor(ntile(highway_dist,5))),size=1.5) +
   scale_colour_manual(values = palette5,
-                      labels=substr(quintileBreaks(highwayPoints_fishnet,"distance_highways"),1,8),
+                      # labels=quintileBreaks(fishnet,"distance_highways"),
                       name="Quintile\nBreaks") +
-  geom_sf(data=houstonHighways, colour = "red") +
+  geom_sf(data=austinHighways, colour = "red") +
   labs(title = "Distance to Highways",
        subtitle = "As fishnet centroids; Highways visualized in red") +
   mapTheme
@@ -649,7 +652,7 @@ fishnet$lagDevelopment <-
                 2)
 
 ggplot() +
-  geom_sf(data=houstonMSA) +
+  geom_sf(data=austinMSA) +
   geom_point(data=fishnet, 
              aes(x=xyC(fishnet)[,1], y=xyC(fishnet)[,2], 
                  colour=factor(ntile(lagDevelopment,5))), size=1.5) +
@@ -672,14 +675,15 @@ options(tigris_class = "sf")
 
 studyAreaCounties <- 
   counties("Texas") %>%
-  st_transform(st_crs(houstonMSA)) %>%
+  st_transform(st_crs(austinMSA)) %>%
   dplyr::select(NAME) %>%
-  .[st_buffer(houstonMSA,-1000), , op=st_intersects]
+  .[st_buffer(austinMSA,-1000), , op=st_intersects]
 ```
 
 ```{r, warning = FALSE, message = FALSE}
 ggplot() +
   geom_sf(data=studyAreaCounties) +
+  geom_sf(data = austinMSA, fill = NA, color = 'red')+
   labs(title = "Study Area Counties") +
   mapTheme
 ```
@@ -691,9 +695,9 @@ The last step is to bring together all the disparate feature layers into a final
 ```{r, warning = FALSE, message = FALSE}
 dat <- 
   cbind(
-    fishnet, highwayPoints_fishnet, fishnetPopulation, aggregatedRasters) %>%
+    fishnet, fishnetPopulation, aggregatedRasters) %>%
   dplyr::select(lc_change, developed, forest, farm, wetlands, otherUndeveloped, water,
-                pop_2000, pop_2010, pop_Change, distance_highways,lagDevelopment) %>%
+                pop_2009, pop_2019, pop_Change, highway_dist,lagDevelopment) %>%
   st_join(studyAreaCounties) %>%
   mutate(developed10 = ifelse(lc_change == 1 & developed == 1, 0, developed)) %>%
   filter(water == 0) 
@@ -709,7 +713,7 @@ The below code block `select`s the highways and spatial lag features, converts e
 
 ```{r, warning = FALSE, message = FALSE}
 dat %>%
-  dplyr::select(distance_highways,lagDevelopment,lc_change) %>%
+  dplyr::select(highway_dist,lagDevelopment,lc_change) %>%
   gather(Variable, Value, -lc_change, -geometry) %>%
   ggplot(., aes(lc_change, Value, fill=lc_change)) + 
     geom_bar(position = "dodge", stat = "summary", fun.y = "mean") +
@@ -725,7 +729,7 @@ Next, the same visualization is created for the population related variables. Ho
 
 ```{r, warning = FALSE, message = FALSE}
 dat %>%
-  dplyr::select(pop_2000,pop_2010,pop_Change,lc_change) %>%
+  dplyr::select(pop_2009,pop_2019,pop_Change,lc_change) %>%
   gather(Variable, Value, -lc_change, -geometry) %>%
   ggplot(., aes(lc_change, Value, fill=lc_change)) + 
     geom_bar(position = "dodge", stat = "summary", fun.y = "mean") +
@@ -753,7 +757,7 @@ dat %>%
   kable() %>% kable_styling(full_width = F)
 ```
 
-# 4. Predicting for 2010
+# 4. Predicting for 2019
 
 In this section, six separate logistic regression models are estimated to predict development change between 2001 and 2011 - with each subsequent model more sophisticated then the last. To do so, the data is split into 50% training/test sets. Models are estimated on the training set.
 
@@ -786,18 +790,18 @@ Model1 <- glm(lc_change ~ wetlands + forest  + farm + otherUndeveloped,
 Model2 <- glm(lc_change ~ wetlands + forest  + farm + otherUndeveloped + lagDevelopment, 
               family="binomial"(link="logit"), data = datTrain)
               
-Model3 <- glm(lc_change ~ wetlands + forest  + farm + otherUndeveloped + lagDevelopment + pop_2000, 
+Model3 <- glm(lc_change ~ wetlands + forest  + farm + otherUndeveloped + lagDevelopment + pop_2009, 
               family="binomial"(link="logit"), data = datTrain)          
               
-Model4 <- glm(lc_change ~ wetlands + forest  + farm + otherUndeveloped + lagDevelopment + pop_2000 + 
-              pop_2010, 
+Model4 <- glm(lc_change ~ wetlands + forest  + farm + otherUndeveloped + lagDevelopment + pop_2009 + 
+              pop_2019, 
               family="binomial"(link="logit"), data = datTrain)              
             
 Model5 <- glm(lc_change ~ wetlands + forest  + farm + otherUndeveloped + lagDevelopment + pop_Change, 
               family="binomial"(link="logit"), data = datTrain)              
               
 Model6 <- glm(lc_change ~ wetlands + forest  + farm + otherUndeveloped + lagDevelopment + pop_Change + 
-              distance_highways, 
+              highway_dist, 
               family="binomial"(link="logit"), data = datTrain) 
 ```
 
@@ -877,8 +881,8 @@ predsForMap <-
 ```
 
 
-<div class="superbigimage">
-```{r, warning = FALSE, message= FALSE, fig.height = 6, fig.width= 8}
+
+```{r, warning = FALSE, message= FALSE, fig.height = 6}
 ggplot() +
   geom_point(data=predsForMap, aes(x=xyC(predsForMap)[,1], y=xyC(predsForMap)[,2], colour=Value)) +
   facet_wrap(~Variable) +
@@ -887,7 +891,7 @@ ggplot() +
   labs(title="Development Predictions - Low Threshold") + 
   mapTheme
 ```
-</div>
+
 
 To provide a bit more insight, the code block below produces both true positives (Sensitivity) and true negatives (Specificity) for each grid cell by threshold type. Notice how the spatial pattern of Sensitivity for both thresholds is relatively consistent, but the 5% threshold misses most the study area with respect to Specificity.
 
@@ -931,7 +935,7 @@ spatialCV <- function(dataFrame, uniqueID, dependentVariable, modelName) {
 endList <- list()
 
 #create a list that is all the spatial group unqiue ids in the data frame (ie counties)    
-  uniqueID_List <- unique(dataFrame[[uniqueID]])  
+  uniqueID_List <- unique(dataFrame$uniqueID)  
   x <- 1
   y <- length(uniqueID_List)
   

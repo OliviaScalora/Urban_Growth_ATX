@@ -182,13 +182,13 @@ lc_change2[lc_change2 < 1] <- NA
 
 names(lc_change2) <- "lc_change"
 
-ggplot() +
-  geom_sf(data=austinMSA) +
-  geom_raster(data=rast(lc_change2) %>% na.omit,
-              aes(x,y,fill=as.factor(value))) +
-  scale_fill_viridis(discrete=TRUE, name ="Land Cover\nChange") +
-  labs(title="Development Land Use Change") +
-  mapTheme
+# ggplot() +
+#   geom_sf(data=austinMSA) +
+#   geom_raster(data=rast(lc_change2) %>% na.omit,
+#               aes(x,y,fill=as.factor(value))) +
+#   scale_fill_viridis(discrete=TRUE, name ="Land Cover\nChange") +
+#   labs(title="Development Land Use Change") +
+#   mapTheme
 ```
 
 Next, the fishnet is created at 4000 by 4000 foot resolution and subset it to the Houston MSA with `st_intersection`. 
@@ -543,7 +543,7 @@ austinHighways <-
 ggplot() +
   geom_point(data=fishnet, 
              aes(x=xyC(fishnet)[,1], y=xyC(fishnet)[,2],colour=lc_change),size=1.5) +
-  geom_sf(data=austinHighways) +
+  geom_sf(data=austinHighways, color = 'red') +
   scale_colour_manual(values = palette2,
                       labels=c("No Change","New Development")) +
   labs(title = "New Development and Highways",
@@ -677,7 +677,7 @@ studyAreaCounties <-
   counties("Texas") %>%
   st_transform(st_crs(austinMSA)) %>%
   dplyr::select(NAME) %>%
-  .[st_buffer(austinMSA,-1000), , op=st_intersects]
+  .[st_buffer(austinMSA,-4000), , op=st_intersects]
 ```
 
 ```{r, warning = FALSE, message = FALSE}
@@ -759,7 +759,7 @@ dat %>%
 
 # 4. Predicting for 2019
 
-In this section, six separate logistic regression models are estimated to predict development change between 2001 and 2011 - with each subsequent model more sophisticated then the last. To do so, the data is split into 50% training/test sets. Models are estimated on the training set.
+In this section, six separate logistic regression models are estimated to predict development change between 2009 and 2019 - with each subsequent model more sophisticated then the last. To do so, the data is split into 50% training/test sets. Models are estimated on the training set.
 
 Normally, as in previous chapters, a results table row would be generated for each model describing the accuracy and generalizability of predictions for each specification. For brevity, a less sophisticated approach is taken here, judging each by the McFadden or “Psuedo” R Squared statistic on the test set. The model with the greatest goodness of fit is then used for the purposes of prediction.
 

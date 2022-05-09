@@ -28,6 +28,12 @@ knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE)
 
 # Introduction
 
+This is a report to predict 2029 urban growth rate and patterns of Austin, TX.
+
+With the current upward rapid rise population and economic development rate, it is at most important to predict population increase in order to efficiently beforehand work towards planning allocation of resources, budgets and infrastructure. These predictions come very handy not only to planners, but also to residents, industries, economics locally but also outside of the region. These predictions not only help in planning urban growth abut also in prevention of urban growth.Urban growth is a spatial process which has a significant impact on the earth’s environment, which need to be tracked and predicted to not lead to urban sprawl into environmentally sensitive areas;  forests, wetlands, farmlands etc.
+For Planners, these predictions which can can be very useful to 
+Land use planning that is both economically productive and sustainable requires both supply and demand-side insights. Specifically, the Planner must understand future demand for development and how that demand contrasts with the supply of environmentally sensitive land. The goal of this chapter is to model this interplay.
+
 ```{r load_packages, message=FALSE, warning=FALSE, results = "hide"}
 # install.packages("RCurl")
 library(tidyverse)
@@ -116,51 +122,11 @@ rast <- function(inRaster) {
 
 # Data Wrangling & Feature Engineering
 
-## 2.2. Land Cover Change Data
+##  Fishnet
 
-```{r load_data, warning = FALSE, message = FALSE, results = "hide"}
-#LC Change was pre processed in ArcGIS using 2008 and 2019 Land cover data 
-# Raster Calculator was used to retrieve raster cells changed from undeveloped to developed between 2008 and 2019
-lc_change = raster("~/GitHub/Urban_Growth_ATX/Austin_Data/urbn_grwth_08_19.tif")
+Our first step is to create a fishnet, which will act as our predictive surface. Each cell will hold values for our dependent and independent variables.
 
-#austinMSA is the extent of the study area (Austing Metropolitan Statistical Area)
-studyAreaCounties<- c("Williamson", "Travis","Bastrop", "Caldwell", "Hays")
-austinMSA <- 
-  st_read('~/GitHub/Urban_Growth_ATX/Austin_Data/Austin_MSA.geojson')%>%
-  st_transform('ESRI:102741')%>%
-  filter(name %in%studyAreaCounties)%>%
-  st_union()
-
-```
-
-```{r plot_msa, warning= FALSE, message= FALSE}
-ggplot() +
-  geom_sf(data=austinMSA, fill = 'white') +
-  geom_raster(data=rast(lc_change) %>% na.omit %>% filter(value > 0), 
-              aes(x,y,fill=as.factor(value))) +
-  scale_fill_manual(values = "#ed6728", label = "Land Cover Change")+
-  labs(title = "Land Cover Change, 2009-2019", 
-       fill = "") +
-  mapTheme
-```
-
-```{r, warning = FALSE, message = FALSE}
-lc_change2 <- lc_change
-
-lc_change2[lc_change2 < 1] <- NA
-
-names(lc_change2) <- "lc_change"
-
-# ggplot() +
-#   geom_sf(data=austinMSA) +
-#   geom_raster(data=rast(lc_change2) %>% na.omit,
-#               aes(x,y,fill=as.factor(value))) +
-#   scale_fill_viridis(discrete=TRUE, name ="Land Cover\nChange") +
-#   labs(title="Development Land Use Change") +
-#   mapTheme
-```
-
-```{r, warning = FALSE, message = FALSE, echo = FALSE}
+```{r fishnet_plot, warning = FALSE, message= FALSE}
 austinMSA_fishnet <- 
   st_make_grid(st_sf(austinMSA), 4000) %>%
   st_sf()
@@ -170,16 +136,71 @@ austinMSA_fishnet <-
 
 # st_write(austinMSA_fishnet, "austinMSA_fishnet.shp")
 
-```
-
-```{r, warning = FALSE, message= FALSE}
 ggplot() +
   geom_sf(data=austinMSA_fishnet) +
   labs(title="Fishnet, 4000 Foot Resolution") +
   mapTheme
 ```
 
-```{r, warning = FALSE, message = FALSE, echo = FALSE}
+##  Land Cover 
+
+Our land cover data for Austin MSA is extracted from Google Earth Engine for the years 2009 - 2019. 
+
+```{r load_2009_lc, warning = FALSE, message = FALSE}
+
+#austinMSA is the extent of the study area (Austing Metropolitan Statistical Area)
+studyAreaCounties<- c("Williamson", "Travis","Bastrop", "Caldwell", "Hays")
+
+austinMSA <- 
+  st_read('~/GitHub/Urban_Growth_ATX/Austin_Data/Austin_MSA.geojson')%>%
+  st_transform('ESRI:102741')%>%
+  filter(name %in%studyAreaCounties)%>%
+  st_union()
+
+```
+
+```{r load_2019_lc, warning = FALSE, message = FALSE}
+
+#2009 and 2019 Land Cover data is read in
+
+lc_2009 <- raster("~/GitHub/Urban_Growth_ATX/Austin_Data/LC_08_rast.tif")
+
+lc_2019 <- raster("~/GitHub/Urban_Growth_ATX/Austin_Data/LC_19_rast.tif")
+
+ggplot() +
+  geom_sf(data=austinMSA) +
+  geom_raster(data = rbind(rast(lc_2009) %>% mutate(label = "2009"),
+                           rast(lc_2019) %>% mutate(label = "2019")) %>% 
+              na.omit %>% filter(value > 0), 
+              aes(x,y,fill=as.factor(value))) +
+  facet_wrap(~label) +
+  scale_fill_viridis(discrete=TRUE, name ="") +
+  labs(title = "Land Cover, 2009 & 2019") +
+  mapTheme + theme(legend.position = "none")
+```
+
+##  Dependent Variable - Land Cover Change
+
+Our goal of this analysis is to predict new urban development, therefore the dependent variable of our regression model is going to be the positive development change seen between the years 2009 and 2019. We pre processed our land cover data in ArcGIS by reclassifying developed land and calculated the difference. We then exported this raster as a binary variable. `1` = new development and `0` = no new development.  
+
+We join this variable to our fishnet, giving each cell an observation of either `1` or `0` for new development or no new development. 
+
+```{r plot_LC_CHANGE, warning= FALSE, message= FALSE}
+
+#LC Change was pre processed in ArcGIS using 2008 and 2019 Land cover data 
+# Raster Calculator was used to retrieve raster cells changed from undeveloped to developed between 2008 and 2019
+lc_change = raster("~/GitHub/Urban_Growth_ATX/Austin_Data/urbn_grwth_08_19.tif")
+# ggplot() +
+#   geom_sf(data=austinMSA, fill = 'white') +
+#   geom_raster(data=rast(lc_change) %>% na.omit %>% filter(value > 0), 
+#               aes(x,y,fill=as.factor(value))) +
+#   scale_fill_manual(values = "#ed6728", label = "Land Cover Change")+
+#   labs(title = "Land Cover Change, 2009-2019", 
+#        fill = "") +
+#   mapTheme
+```
+
+```{r LC_fishnet_plot, warning = FALSE, message = FALSE, echo = FALSE}
 
 #centroid of each raster cell transformed to a point
 # changePoints <-
@@ -211,50 +232,11 @@ ggplot() +
   mapTheme
 ```
 
+##  Predictive Variables
 
-## 2.3. Land Cover in 2009
+### Land Cover 
 
-2009 LANDCOVER IMAGE HERE
-
-```{r, warning = FALSE, message = FALSE}
-
-lc_2009 <- raster("~/GitHub/Urban_Growth_ATX/Austin_Data/LC_08_rast.tif")
-
-#read in fishnet output created from arcGIS to have FID column
-# fishnet_fid<- st_read('~/GitHub/Urban_Growth_ATX/Austin_Data/Fishnet.shp')
-# fishnet <- cbind(fishnet,fishnet_fid%>%st_drop_geometry)%>%
-#   dplyr::select(-u__08_1)%>%
-#   rename(FID = FID_1)
-
-#Read LC_08 in, rename majority landcover type
-# LC_08<- read.csv('~/GitHub/Urban_Growth_ATX/Austin_Data/LC_08.csv')%>%
-#   dplyr::select(FID, MAJORITY)%>%
-#   rename(LC_08 = MAJORITY)
-
-#Read LC_19 in, rename majority landcover type
-# i dont know if we need this yet
-# LC_19<- read.csv('~/GitHub/Urban_Growth_ATX/Austin_Data/LC_19.csv')%>%
-#   dplyr::select(FID, MAJORITY)%>%
-#   rename(LC_19 = MAJORITY)
-# LC_19 <- fishnet%>%left_join(., LC_19, by = 'FID')
-
-# join landcover values from 2008 to fishnet
-# fishnet <- fishnet%>%left_join(., LC_08, by = 'FID')
-
-#Read Land Cover CSV and join to fishnet 
-# Landcover graphics made in ArcGIS
-
-ggplot() +
-  geom_sf(data=austinMSA) +
-  geom_raster(data=rast(lc_2009) %>% na.omit %>% filter(value > 0),
-              aes(x,y,fill=as.factor(value))) +
-  scale_fill_viridis(discrete=TRUE, name ="") +
-  labs(title = "Land Cover, 2009") +
-  mapTheme +
-  theme(legend.direction="horizontal")
-```
-
-The table below shows the approach taken to recoded existing land cover codes into the categories used in our analysis. In the code block below new rasters are generated and `names` are applied. Naming ensures that when the raster is integrated with the fishnet, the column reflects the appropriate raster.
+Our next step is to join our predictive variables to our fishnet. We begin with our original land cover raster from 2009. We reclassify these according to the table below. Each land cover classification becomes a predictor for our model. 
 
 | Old_Classification             | New_Classification                                  |
 |--------------------------------|-----------------------------------------------------|
@@ -265,7 +247,7 @@ The table below shows the approach taken to recoded existing land cover codes in
 | Barren Land, Dwarf Scrub, and Grassland/Herbaceous | Other Undeveloped |
 | Water | Water |
 
-```{r, warning = FALSE, message = FALSE}
+```{r LC_reclass, warning = FALSE, message = FALSE}
 
 # fishnet<- fishnet%>%
 #   mutate(LC_08_reclass = case_when(LC_08 == 21 | LC_08 == 22 |LC_08 == 23 |LC_08 == 24~ "developed", 
@@ -288,9 +270,23 @@ names(farm) <- "farm"
 names(wetlands) <- "wetlands"
 names(otherUndeveloped) <- "otherUndeveloped"
 names(water) <- "water"
+
+developed19 <- lc_2019 == 21 | lc_2019 == 22 | lc_2019 == 23 | lc_2019 == 24
+forest19 <- lc_2019 == 41 | lc_2019 == 42 | lc_2019 == 43 
+farm19 <- lc_2019 == 81 | lc_2019 == 82 
+wetlands19 <- lc_2019 == 90 | lc_2019 == 95 
+otherUndeveloped19 <- lc_2019 == 52 | lc_2019 == 71 | lc_2019 == 31 
+water19 <- lc_2019 == 11
+
+names(developed19) <- "developed19"
+names(forest19) <- "forest19"
+names(farm19) <- "farm19"
+names(wetlands19) <- "wetlands19"
+names(otherUndeveloped19) <- "otherUndeveloped19"
+names(water19) <- "water19"
 ```
 
-```{r, warning = FALSE, message = FALSE}
+```{r aggrast_func, warning = FALSE, message = FALSE}
 aggregateRaster <- function(inputRasterList, theFishnet) {
   #create an empty fishnet with the same dimensions as the input fishnet
   theseFishnets <- theFishnet %>% dplyr::select()
@@ -316,7 +312,7 @@ aggregateRaster <- function(inputRasterList, theFishnet) {
   }
 ```
 
-```{r, warning = FALSE, message = FALSE}
+```{r aggrast_LC vars, warning = FALSE, message = FALSE}
 theRasterList <- c(developed,forest,farm,wetlands,otherUndeveloped,water)
 
 aggregatedRasters <-
@@ -341,9 +337,11 @@ aggregatedRasters %>%
    mapTheme
 ```
 
-## 2.4. Census Data
+### Population
 
-```{r, warning = FALSE, message = FALSE, results = "hide"}
+Population growth within an area is a huge indicator of whether that area can expect new development. We load in population data from the US Census at the tract level for 2009 and 2019. 
+
+```{r load_census, warning = FALSE, message = FALSE, results = "hide"}
 
 census_api_key('d5e25f48aa48bf3f0766baab06d59402ea032067')
 
@@ -360,10 +358,6 @@ AustinPop_09 <-
   rename(pop_2009 = B01003_001) %>%
   st_transform(st_crs(austinMSA_fishnet))
 
-
-```
-
-```{r, warning = FALSE, message = FALSE, results = "hide"}
 AustinPop_19 <- 
   get_acs(geography = "tract", variables = "B01003_001", year = 2019,
                 state = 48, geometry = TRUE, 
@@ -372,9 +366,10 @@ AustinPop_19 <-
   spread(variable, estimate)%>% 
   rename(pop_2019 = B01003_001) %>%
   st_transform(st_crs(austinMSA_fishnet))
+
 ```
 
-```{r, warning = FALSE, message = FALSE, fig.height= 8, fig.width= 11}
+```{r pop_plot, warning = FALSE, message = FALSE, fig.height= 8, fig.width= 11}
 grid.arrange(
 ggplot() +
   geom_sf(data = AustinPop_09, aes(fill=factor(ntile(pop_2009,5))), colour=NA) +
@@ -393,7 +388,7 @@ ggplot() +
   mapTheme, ncol=2)
 ```
 
-```{r, warning = FALSE, message = FALSE}
+```{r pop_net, warning = FALSE, message = FALSE}
 austinMSA_fishnet <-
   austinMSA_fishnet %>%
   rownames_to_column("fishnetID") %>% 
@@ -426,28 +421,26 @@ fishnetPopulation <-
   mutate(pop_Change = pop_2019 - pop_2009)
 ```
 
-```{r, warning = FALSE, message = FALSE, fig.height = 8, fig.width= 11}
-grid.arrange(
-ggplot() +
-  geom_sf(data=AustinPop_19, aes(fill=factor(ntile(pop_2019,5))),colour=NA) +
-  scale_fill_manual(values = palette5,
-                    labels=substr(quintileBreaks(AustinPop_19,"pop_2019"),1,4),
-                   name="Quintile\nBreaks") +
-  labs(title="Population, Austin MSA: 2019",
-       subtitle="Represented as tracts; Boundaries omitted") +
-  mapTheme,
+We join both population counts to our fishnet surface. This join is done by an area weighted calculation to appropriately allocate a population count to each fishnet cell depending on the proportion of the tract in which it falls. We then calculate the difference in population between our study years to create a population change variable that will be used in our final model. Below, we see the population change between 2009 and 2019 for each fishnet cell.
+
+```{r pop_change_plot, warning = FALSE, message = FALSE, fig.height = 8, fig.width= 11}
 
 ggplot() +
-  geom_sf(data=fishnetPopulation, aes(fill=factor(ntile(pop_2019,5))),colour=NA) +
+  geom_sf(data=fishnetPopulation, aes(fill=factor(ntile(pop_Change,5))),colour=NA) +
   scale_fill_manual(values = palette5,
                    labels=substr(quintileBreaks(fishnetPopulation,"pop_2019"),1,4),
                    name="Quintile\nBreaks") +
-  labs(title="Population, Austin MSA: 2019",
+  labs(title="Population Change , Austin MSA: 2009 - 2019",
        subtitle="Represented as fishnet gridcells; Boundaries omitted") +
-  mapTheme, ncol=2)
+  mapTheme
+
 ```
 
-```{r, warning = FALSE, message = FALSE, results = "hide"}
+### Highway Infrastructure
+
+We can reasonable assume that location of major transportation infrastructure will have predictive power in new development. We load in a Texas highway shapefile from [Data.Gov](https://catalog.data.gov/dataset/tiger-line-shapefile-2019-state-texas-primary-and-secondary-roads-state-based-shapefile?msclkid=1f2c2445cfcb11ecbd34d7c3bfd332df) and clip it with our Austin MSA boundary. Because we are interested in proximity to highways, we run an euclidean distance analysis on our shapefile and join the output values to our fishnet. Below, we plot the highway shapefile and visualize it in relation to our dependent variable, land cover change. Next to it, we plot the euclidean distance values in quintile breaks. 
+
+```{r read_highways, warning = FALSE, message = FALSE, results = "hide"}
 austinHighways <-
   st_read("~/GitHub/Urban_Growth_ATX/Austin_Data/Austin_Highways.geojson") %>%
   st_transform(st_crs(austinMSA)) %>%
@@ -455,18 +448,10 @@ austinHighways <-
 ```
 
 ```{r plot_highway, warning = FALSE, message= FALSE}
-ggplot() +
-  geom_point(data=fishnet, 
-             aes(x=xyC(fishnet)[,1], y=xyC(fishnet)[,2],colour=lc_change),size=1.5) +
-  geom_sf(data=austinHighways, color = 'red') +
-  scale_colour_manual(values = palette2,
-                      labels=c("No Change","New Development")) +
-  labs(title = "New Development and Highways",
-       subtitle = "As fishnet centroids") +
-  mapTheme
+
 ```
 
-```{r, warning = FALSE, message = FALSE}
+```{r euclid, warning = FALSE, message = FALSE}
 
 emptyRaster <- lc_change
 emptyRaster[] <- NA
@@ -496,7 +481,16 @@ highway_dist <-highway_dist%>%
 
 
 fishnet <- left_join(fishnet, highway_dist)
-
+grid.arrange(
+ggplot() +
+  geom_point(data=fishnet, 
+             aes(x=xyC(fishnet)[,1], y=xyC(fishnet)[,2],colour=lc_change),size=1.5) +
+  geom_sf(data=austinHighways, color = 'red') +
+  scale_colour_manual(values = palette2,
+                      labels=c("No Change","New \nDevelopment")) +
+  labs(title = "New Development and Highways",
+       subtitle = "As fishnet centroids") +
+  mapTheme,
 ggplot() +
   geom_sf(data=austinMSA) +
   geom_point(data=fishnet, aes(x=xyC(fishnet)[,1], 
@@ -508,10 +502,12 @@ ggplot() +
   geom_sf(data=austinHighways, colour = "red") +
   labs(title = "Distance to Highways",
        subtitle = "As fishnet centroids; Highways visualized in red") +
-  mapTheme
+  mapTheme, nrow = 1, widths=c(2.3,2))
 ```
 
-## 2.6. The Spatial Lag of Development
+### The Spatial Lag of Development
+
+Our next predictive variable is the relationship of each fishnet cell to the closest observed development. We do this by creating a "spatial lag" using a nearest neighbor function. 
 
 ```{r, warning = FALSE, message = FALSE}
 nn_function <- function(measureFrom,measureTo,k) {
@@ -551,12 +547,14 @@ ggplot() +
   scale_colour_manual(values = palette5,
                      labels=substr(quintileBreaks(fishnet,"lagDevelopment"),1,7),
                      name="Quintile\nBreaks") +
-  labs(title = "Spatial Lag to 2001 Development",
+  labs(title = "Spatial Lag to 2009 Development",
        subtitle = "As fishnet centroids") +
   mapTheme
 ```
 
-## 2.7. MSA Counties
+### Counties in MSA 
+
+We also can assume that municipal boundaries will impact how much land will develop given varying legislation.We create a categorical variable that labels each fishnet cell with the county under which it exists. We see this plotted below. 
 
 ```{r, warning = FALSE, message = FALSE, results = "hide"}
 options(tigris_class = "sf")
@@ -571,13 +569,12 @@ studyAreaCounties <-
 
 ```{r, warning = FALSE, message = FALSE}
 ggplot() +
-  geom_sf(data=studyAreaCounties) +
-  geom_sf(data = austinMSA, fill = NA, color = 'red')+
-  labs(title = "Study Area Counties") +
+  geom_sf(data = austinMSA, fill = 'white', color = 'NA')+
+  geom_sf(data = fishnet, fill = NA, color = "light grey")+
+  geom_sf(data=studyAreaCounties, fill = NA, size= 1) +
+  labs(title = "Study Area Counties", subtitle = "With Fishnet") +
   mapTheme
 ```
-
-## 2.8. Create the Final Dataset
 
 ```{r, warning = FALSE, message = FALSE}
 dat <- 
@@ -591,6 +588,8 @@ dat <-
 ```
 
 # Exploratory Analysis
+
+
 
 ```{r, warning = FALSE, message = FALSE}
 dat %>%
@@ -636,7 +635,7 @@ dat %>%
 
 # Building the Model
 
-## 4.2. Modeling
+### Modeling
 
 ```{r, warning = FALSE, message = FALSE}
 set.seed(3456)
@@ -696,8 +695,7 @@ ggplot(testSetProbs, aes(probs)) +
   plotTheme
 ```
 
-## 4.3. Accuracy
-
+### Accuracy
 
 Now to pick a predicted probability threshold to classify an area as having new development. Recall, *Sensitivity* or the True Positive rate is the proportion of actual positives (1’s) that were predicted to be positive. For example, the Sensitivity in our model is the rate of developed areas actually predicted as such. *Specificity* or True Negative Rate is the proportion of actual negatives (0’s) that were predicted to be negatives. For example, the Specificity in our model is the rate of No Change areas that were correctly predicted as No change.
 
@@ -748,7 +746,7 @@ predsForMap <-
     st_cast("POLYGON")
 ```
 
-```{r, warning = FALSE, message= FALSE}
+```{r, warning = FALSE, message= FALSE, fig.width = 10, fig.height = 4}
 ggplot() +
   geom_point(data=predsForMap, aes(x=xyC(predsForMap)[,1], y=xyC(predsForMap)[,2], colour=Value)) +
   facet_wrap(~Variable) +
@@ -785,7 +783,7 @@ ggplot(data=ConfusionMatrix.metrics) +
   labs(title="Development Predictions - Low Threshold") + mapTheme
 ```
 
-## 4.4 Generalizability
+### Generalizability
 
 ```{r, warning = FALSE, message = FALSE}
 spatialCV <- function(dataFrame, uniqueID, dependentVariable, modelName) {
@@ -858,35 +856,29 @@ spatialCV_metrics %>%
 
 # Predicting for 2029 - Demand-side change
 
-At this point, a simple but useful model has been trained to predict urban development between 2001 and 2011 as a function of baseline features from 2001 including land cover, built environment and population. Next, we are going to update our features to reflect a 2019 baseline. Having done so, predictions from our new model would then be fore 2029.
-
-Generalizability is always the concern when forecasting, and for this use case Planners must ask themselves whether the 2009-2019 Austin experience generalizes to the 2019-2029 Austin experience. In other words, have the macroeconomic real estate conditions changed dramatically between the two time periods? This is question with no definitive answer, but it useful to consider the exogenous factors that may differentiate today’s Houston from that of 2011. The big for instance is climate change, and the aftermath of Hurricane Harvey. In August of 2017 Harvey devastated large portions of this region causing $125 billion in damage. If the real estate market capitalized flood risk into devastated areas going forward, this would effectively change the nature of real estate demand in the region. Thus the pre-flood, 2011 experienced is no longer entirely relevant.
-
-This would not completely invalidate the model if these changes are marginal, as development demand predictions can be adjusted in Section 7 below. However, consider the usefulness of this approach for a coastal city that looses say 10% of its developable land to sea level rise in the following decade.
-
-For brevity, we only update two features in our model. First, population change (`pop_change`) is updated using county level population projections visualized in the plot below. The second is `lagDevelopment`, which describes how predicted new development relates in space to old development.
-
-Once the features are updated, 2020 predictions are estimated and mapped.
-
-Below, `lagDevelopment` is mutate describing average distance to 2010 development. Note that the field name, `lagDevelopment` is unchanged (ie. not updated to `lagDevelopment_2010`). This is done purposefully as model6 has a regression coefficient called `lagDevelopment`. If this variable wasn’t present in our updated data frame then the `predict` command would fail.
+Now to update population change. A new data frame, `countyPopulation_2029` is created which includes 2019 population counts and 2029 projections for each county in the study area. Population is plotted by year and by county. Houston’s Travis County is projected to see the greatest population gains by far. Anecdotally, we know that much of Harris County is already developed, which suggests its development scenario will involve more ‘infill’ development then sprawl.
 
 ```{r, warning = FALSE, message = FALSE}
+
+# change lagDevelopment variable to average distance to 2019 development
+# keep the field name so the model will run 
 dat <-
   dat %>%
   mutate(lagDevelopment = nn_function(xyC(.), xyC(filter(.,developed20 == 1)),2))
 ```
 
-Now to update population change. A new data frame, `countyPopulation_2029` is created which includes 2019 population counts and 2029 projections for each county in the study area. Population is plotted by year and by county. Houston’s Travis County is projected to see the greatest population gains by far. Anecdotally, we know that much of Harris County is already developed, which suggests its development scenario will involve more ‘infill’ development then sprawl.
-
-estimated Austin MSA population growth between 2019 and 2029 is 700,000
-2019 population by each county
-Williamson County	- 570,437 : prop - 26% : growth = 182000
-Travis County	- 1,250,884 : prop - 58% : growth = 406000
-Bastrop County -	86,839 : prop - 4% : growth = 28000
-Caldwell County -	42,817 : prop - 2% : growth = 14000
-Hays County -	222,827 : prop - 10% : growth = 70000
-total: 2173804
 ```{r, warning = FALSE, message = FALSE}
+
+# update population change variable to reflect the projected change in population per fishnet cell between 2019 and 2029
+# estimated Austin MSA population growth between 2019 and 2029 is 700,000
+# 2019 population by each county
+# Williamson County	- 570,437 : prop - 26% : growth = 182000
+# Travis County	- 1,250,884 : prop - 58% : growth = 406000
+# Bastrop County -	86,839 : prop - 4% : growth = 28000
+# Caldwell County -	42,817 : prop - 2% : growth = 14000
+# Hays County -	222,827 : prop - 10% : growth = 70000
+# total: 2173804
+
 countyPopulation_2029 <- 
   data.frame(
    NAME = 
@@ -912,10 +904,6 @@ countyPopulation_2029 %>%
   plotTheme
 ```
 
-# Predicting for 2029 - Demand-side change
-
-The map of predicted probabilities that results is best thought of as a measure of predicted development demand in 2029.
-
 ```{r, warning = FALSE, message = FALSE}
 dat_infill <-
   dat %>%
@@ -929,6 +917,8 @@ dat_infill <-
   #predict for 2020
     mutate(predict_2029.infill = predict(Model6,. , type="response"))
 
+# The map of predicted probabilities that results is best thought of as a measure of predicted development demand in 2029.
+
 dat_infill %>%
   ggplot() +  
   geom_point(aes(x=xyC(dat_infill)[,1], y=xyC(dat_infill)[,2], colour = factor(ntile(predict_2029.infill,5)))) +
@@ -939,7 +929,6 @@ dat_infill %>%
   labs(title= "Development Demand in 2029: Predicted Probabilities") +
   mapTheme
 ```
-
 
 # Predicting for 2029 - Supply-side change
 
@@ -954,15 +943,18 @@ new_dev_shp <-
 new_dev2 <- raster("~/GitHub/Urban_Growth_ATX/Austin_Data/new_dev2.tif")%>%
   mask(., austinMSA_fishnet)
 
-ggplot() +
-  geom_sf(data=austinMSA) +
-  geom_raster(data=rast(new_dev2) %>% na.omit,
-              # %>% filter(value > 0),
-              aes(x,y,fill=as.factor(value))) +
-  geom_sf(data = new_dev_shp, fill= NA, color = "red", size = 1)+
-  scale_fill_viridis(discrete=TRUE, name ="") +
-  labs(title = "New Development Scenario, 2029") +
-  mapTheme
+# ggplot() +
+#   geom_sf(data=austinMSA) +
+#   geom_raster(data=rast(new_dev2) %>% na.omit,
+#               # %>% filter(value > 0),
+#               aes(x,y,fill=as.factor(value))) +
+#   geom_sf(data = new_dev_shp, fill= NA, aes(color = "red"), size = 1)+
+#   scale_color_manual(values = "red",
+#                      labels = "Proposed New Development")+
+#   scale_fill_manual(values = palette2, 
+#                     labels = c("Not Developed", "Developed"),name ="") +
+#   labs(title = "New Development Scenario, 2029") +
+#   mapTheme
 ```
 
 ```{r}
@@ -985,6 +977,7 @@ developed_29_rast %>%
   ggplot() +
     geom_sf(data=austinMSA) +
     geom_point(aes(X,Y, colour=as.factor(value))) +
+  geom_sf(data = new_dev_shp, fill= NA, color = "red", size = 1)+
     facet_wrap(~var) +
     scale_colour_manual(values = palette2,
                         labels=c("Other","Land Cover"),
@@ -992,59 +985,230 @@ developed_29_rast %>%
     labs(title = "Land Cover Types, 2009",
          subtitle = "As fishnet centroids") +
    mapTheme
-```
-
-```{r}
-
-dat.dev <- 
-  cbind(
-    fishnet, fishnetPopulation, aggregatedRasters, developed_29_rast) %>%
-  dplyr::select(lc_change, developed_29, forest, farm, wetlands, otherUndeveloped, water,
-                pop_Change, highway_dist,lagDevelopment) %>%
-  st_join(studyAreaCounties) %>%
-  mutate(developed20 = ifelse(lc_change == 1 & developed_29 == 1, 0, 1)) %>%
-  filter(water == 0) %>%na.omit()
 
 ```
 
-update lagDevelopment to reflect lag from new_dev
+```{r, warning = FALSE, message = FALSE}
+
+#update variables to be 2019 baseline - developed29 is our proposed new development 
+theRasterList19 <- c(developed_29,forest19,farm19,wetlands19,otherUndeveloped19,water19)
+
+dat2 <-
+  aggregateRaster(theRasterList19, dat) %>%
+  dplyr::select(developed_29,forest19,farm19,wetlands19,otherUndeveloped19,water19) %>%
+  st_set_geometry(NULL) %>%
+  bind_cols(.,dat) %>%
+  st_sf() %>%
+  st_cast("POLYGON")
+
+# dat2 %>%
+#   gather(var,value,developed_29:water19) %>%
+#   st_centroid() %>%
+#   mutate(X = st_coordinates(.)[,1],
+#          Y = st_coordinates(.)[,2]) %>%
+#   ggplot() +
+#     geom_sf(data=austinMSA) +
+#     geom_point(aes(X,Y, colour=as.factor(value))) +
+#     facet_wrap(~var) +
+#     scale_colour_manual(values = palette2,
+#                         labels=c("Other","Land Cover"),
+#                         name = "") +
+#     labs(title = "Land Cover Types, 2019",
+#          subtitle = "As fishnet centroids") +
+#    mapTheme
+```
+
 ```{r newdev2, warning = FALSE, message = FALSE}
-dat.dev <-
-  dat.dev %>%
+
+#update lagDevelopment to reflect lag from new_dev
+dat2 <-
+  dat2 %>%
   mutate(lagDevelopment = nn_function(xyC(.), xyC(filter(.,developed_29 == 1)),2))
+
+grid.arrange(
+ggplot() +
+  geom_sf(data=austinMSA) +
+  geom_raster(data=rast(new_dev2) %>% na.omit,
+              # %>% filter(value > 0),
+              aes(x,y,fill=as.factor(value))) +
+  geom_sf(data = new_dev_shp, fill= NA, aes(color = "red"), size = 1)+
+  scale_color_manual(values = "red",
+                     labels = "Proposed New Development")+
+  scale_fill_manual(values = palette2, 
+                    labels = c("Not Developed", "Developed"),name ="") +
+  labs(title = "Proposed New Development") +
+  mapTheme+theme(legend.position = "bottom",
+                 legend.direction = "horizontal"),
+
 
 ggplot() +
   geom_sf(data=austinMSA) +
-  geom_point(data=dat.dev, 
-             aes(x=xyC(dat.dev)[,1], y=xyC(dat.dev)[,2], 
+  geom_point(data=dat2, 
+             aes(x=xyC(dat2)[,1], y=xyC(dat2)[,2], 
                  colour=factor(ntile(lagDevelopment,5))), size=1.5) +
   scale_colour_manual(values = palette5,
-                     labels=substr(quintileBreaks(dat.dev,"lagDevelopment"),1,7),
+                     labels=substr(quintileBreaks(dat2,"lagDevelopment"),1,7),
                      name="Quintile\nBreaks") +
-  labs(title = "Spatial Lag to Proposed 2029 Development",
+  labs(title = "Spatial Lag to Proposed New Development",
        subtitle = "As fishnet centroids") +
-  mapTheme
+  mapTheme+theme(legend.position = "bottom",
+                 legend.direction = "horizontal"), nrow = 1)
 ```
-
 
 ```{r}
 
-dat.dev <-
-  dat.dev %>%
-    mutate(predict_2029.dev = predict(Model6,. , type="response"))
-
+dat2 <-
+  dat2 %>%
+    mutate(predict_2029.dev = predict(Model6,. , type="response"))%>%
+  mutate(predProbs = ifelse(predict_2029.dev > .17, 1, 0))
   
-dat.dev %>%
+dat2 %>%
   ggplot() +  
-  geom_point(aes(x=xyC(dat.dev)[,1], y=xyC(dat.dev)[,2], colour = factor(ntile(predict_2029.dev,5)))) +
+  geom_point(aes(x=xyC(dat2)[,1], y=xyC(dat2)[,2], colour = factor(ntile(predict_2029.dev,5)))) +
   scale_colour_manual(values = palette5,
-                    labels=substr(quintileBreaks(dat.dev,"predict_2029.dev"),1,4),
+                    labels=substr(quintileBreaks(dat2,"predict_2029.dev"),1,4),
                     name="Quintile\nBreaks") +
   geom_sf(data=studyAreaCounties, fill=NA, colour="black", size=1) +
   labs(title= "Supply Side Scenario: \nNew Development") +
   mapTheme+theme(legend.position ="bottom",
                  legend.direction = "horizontal",
                  legend.background = element_rect(fill='grey95', color = NA))
+# 
+# dat2 %>%
+#   ggplot() +  
+#   geom_point(aes(x=xyC(dat2)[,1], y=xyC(dat2)[,2], colour = as.factor(predProbs))) +
+#   scale_colour_manual(values = palette2) +
+#   geom_sf(data=studyAreaCounties, fill=NA, colour="black", size=1) +
+#   labs(title= "Supply Side Scenario: \nNew Development") +
+#   mapTheme+theme(legend.position ="bottom",
+#                  legend.direction = "horizontal",
+#                  legend.background = element_rect(fill='grey95', color = NA))
 ```
 
+```{r, warning = FALSE, message = FALSE, fig.height = 6, fig.width= 6}
+dat2 <-
+  dat2 %>%
+   mutate(sensitive_lost19 = ifelse(forest == 1 & forest19 == 0 |
+                                    wetlands == 1 & wetlands19 == 0,1,0))
+                      
+# ggplot() +
+#   geom_point(data=dat2, aes(x=xyC(dat2)[,1], y=xyC(dat2)[,2], colour=as.factor(sensitive_lost19))) +
+#   scale_colour_manual(values = palette2,
+#                       labels=c("No Change","Sensitive Lost"),
+#                       name = "") +
+#   labs(title = "Sensitive lands lost: 2009 - 2019",
+#        subtitle = "As fishnet centroids") +
+#   mapTheme
+```
 
+```{r, warning = FALSE, message = FALSE, fig.height = 6, fig.width= 6}
+sensitiveRegions <- 
+  raster::clump(wetlands19 + forest19) %>%
+  rasterToPolygons() %>%
+  st_as_sf() %>%
+  group_by(clumps) %>% 
+  summarize() %>%
+    mutate(Acres = as.numeric(st_area(.) * 0.0000229568)) %>%
+    filter(Acres > 3954)  %>%
+  dplyr::select() %>%
+  raster::rasterize(.,emptyRaster) 
+sensitiveRegions[sensitiveRegions > 0] <- 1  
+names(sensitiveRegions) <- "sensitiveRegions"
+
+dat2 <-
+  aggregateRaster(c(sensitiveRegions), dat2) %>%
+  dplyr::select(sensitiveRegions) %>%
+  st_set_geometry(NULL) %>%
+  bind_cols(.,dat2) %>%
+  st_sf()
+
+# ggplot() +
+#   geom_point(data=dat2, aes(x=xyC(dat2)[,1], y=xyC(dat2)[,2], colour=as.factor(sensitiveRegions))) +
+#   scale_colour_manual(values = palette2,
+#                       labels=c("Other","Sensitive Regions"),
+#                       name="") +
+#   labs(title = "Sensitive regions",
+#        subtitle = "Continous areas of either wetlands or forests\ngreater than 1 acre") +
+#   mapTheme
+```
+
+```{r, warning = FALSE, message = FALSE}
+county_specific_metrics <- 
+  dat2 %>%
+  #predict development demand from our model
+  mutate(Development_Demand = predict(Model6, dat2, type="response")) %>%
+  #get a count count of grid cells by county which we can use to calculate rates below
+  left_join(st_set_geometry(dat, NULL) %>% group_by(NAME) %>% summarize(count = n())) %>%
+  #calculate summary statistics by county
+  group_by(NAME) %>%
+  summarize(Total_Farmland = sum(farm19) / max(count),
+            Total_Forest = sum(forest19) / max(count),
+            Total_Wetlands = sum(wetlands19) / max(count),
+            Total_Undeveloped = sum(otherUndeveloped19) / max(count),
+            Mean_Development_Demand = mean(Development_Demand)) %>%
+  #get population data by county
+  left_join(countyPopulation_2029 %>% 
+            mutate(Population_Change = county_projection_2029 - county_population_2019,
+                   Population_Change_Rate = Population_Change / county_projection_2029) %>%
+            dplyr::select(NAME,Population_Change_Rate))
+```
+
+```{r, warning = FALSE, message = FALSE}
+county_specific_metrics %>%
+  gather(Variable, Value, -NAME, -geometry) %>%
+  mutate(Variable = factor(Variable, levels=c("Population_Change_Rate","Mean_Development_Demand",
+                                              "Total_Farmland","Total_Undeveloped","Total_Forest",
+                                              "Total_Wetlands","Sensitive_Land_Lost","Sensitive_Regions",
+                                              ordered = TRUE))) %>%
+  mutate(Planning_Designation = case_when(
+    Variable == "Population_Change_Rate" | Variable == "Mean_Development_Demand" ~ "Demand-Side",
+    Variable == "Total_Farmland" | Variable == "Total_Undeveloped"               ~ "Suitable",
+    TRUE                                                                         ~ "Not Suitable")) %>%
+  ggplot(aes(x=Variable, y=Value, fill=Planning_Designation)) +
+    geom_bar(stat="identity", position=position_dodge(), colour="black") +
+    facet_wrap(~NAME, ncol=5) +
+    coord_flip() +
+    scale_y_continuous(breaks = seq(.25, 1, by = .25)) +
+    geom_vline(xintercept = 2.5) + geom_vline(xintercept = 4.5) +
+    scale_fill_manual(values=c("black","red","darkgreen")) +
+    labs(title= "County Specific Allocation Metrics", subtitle= "As rates", x="Indicator", y="Rate") +
+    plotTheme + theme(axis.text.x = element_text(angle = 45, hjust = 1), legend.position="bottom")
+```
+
+```{r, warning = FALSE, message = FALSE, fig.height= 8, fig.width= 11}
+Travis <-
+  dat2 %>%
+    mutate(Development_Demand = predict(Model6, dat2, type="response")) %>%
+    filter(NAME == "Travis") 
+
+Travis_landUse <- rbind(
+  filter(Travis, forest19 == 1 | wetlands19 == 1 ) %>%
+  dplyr::select() %>% mutate(Land_Use = "Not Suitable"),
+  filter(Travis, developed_29 == 1) %>%
+  dplyr::select() %>% mutate(Land_Use = "Developed"))
+
+grid.arrange(
+ggplot() +
+  geom_sf(data=Travis, aes(fill=factor(ntile(Development_Demand,5))), colour=NA) +
+  geom_point(data=Travis_landUse, aes(x=xyC(Travis_landUse)[,1], 
+                                        y=xyC(Travis_landUse)[,2], colour=Land_Use),
+                                        shape = 15, size = 1.5) +
+  geom_sf(data=st_intersection(austinHighways,filter(studyAreaCounties, NAME=="Travis")), size=1, color = "yellow") +
+  scale_fill_manual(values = palette5, name="Development\nDemand",
+                    labels=substr(quintileBreaks(Travis,"Development_Demand"),1,5)) +
+  scale_colour_manual(values = c("black","red")) + 
+  labs(title = "Development Potential, 2029: Fort Bend") + mapTheme +
+  guides(fill = guide_legend(order = 1), colour = guide_legend(order = 2)),
+
+ggplot() +
+  geom_sf(data=Travis, aes(fill=factor(ntile(pop_Change,5))), colour=NA) +
+  geom_point(data=Travis_landUse, aes(x=xyC(Travis_landUse)[,1], 
+                                        y=xyC(Travis_landUse)[,2], colour=Land_Use),
+                                        shape = 15, size = 1.5) +
+  geom_sf(data=st_intersection(austinHighways,filter(studyAreaCounties, NAME=="Travis")), size=1, color = "yellow") +
+  scale_fill_manual(values = palette5, name="Population\nChange",
+                    labels=substr(quintileBreaks(Travis,"pop_Change"),1,5)) +
+  scale_colour_manual(values = c("black","red")) + 
+  labs(title = "Projected Population, 2029: Travis") + mapTheme +
+  guides(fill = guide_legend(order = 1), colour = guide_legend(order = 2)), ncol=2)
+```

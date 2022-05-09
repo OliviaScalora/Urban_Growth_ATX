@@ -182,10 +182,10 @@ ggplot() +
 ```{r, warning = FALSE, message = FALSE, echo = FALSE}
 
 #centroid of each raster cell transformed to a point
-changePoints <-
-  rasterToPoints(lc_change) %>%
-  as.data.frame() %>%
-  st_as_sf(coords = c("x", "y"), crs = st_crs(austinMSA_fishnet))
+# changePoints <-
+#   rasterToPoints(lc_change) %>%
+#   as.data.frame() %>%
+#   st_as_sf(coords = c("x", "y"), crs = st_crs(austinMSA_fishnet))
 
 #Join takes a long time to run - for markdown, we store the output and read it back in
 # fishnet_join <- 
@@ -912,9 +912,7 @@ countyPopulation_2029 %>%
   plotTheme
 ```
 
-## 5.2. Predicting Development Demand
-
-Next, the `countyPopulation_2029` table is joined to `dat` and `pop_change` in order to ‘distribute’ the new population across the study area. To do so, the the allocation of new population is weighted by a grid cell’s existing population (`pop_2029.infill`). 2019 population is subtracted from this figure to get `pop_Change`. Finally, `Model6` is used to predict for 2029 given the updated population change and lag development features.
+# Predicting for 2029 - Demand-side change
 
 The map of predicted probabilities that results is best thought of as a measure of predicted development demand in 2029.
 
@@ -1004,13 +1002,13 @@ dat.dev <-
   dplyr::select(lc_change, developed_29, forest, farm, wetlands, otherUndeveloped, water,
                 pop_Change, highway_dist,lagDevelopment) %>%
   st_join(studyAreaCounties) %>%
-  # mutate(developed20 = ifelse(lc_change == 1 & developed == 1, 0, 1)) %>%
+  mutate(developed20 = ifelse(lc_change == 1 & developed_29 == 1, 0, 1)) %>%
   filter(water == 0) %>%na.omit()
 
 ```
 
 update lagDevelopment to reflect lag from new_dev
-```{r newdev, warning = FALSE, message = FALSE}
+```{r newdev2, warning = FALSE, message = FALSE}
 dat.dev <-
   dat.dev %>%
   mutate(lagDevelopment = nn_function(xyC(.), xyC(filter(.,developed_29 == 1)),2))
@@ -1034,16 +1032,7 @@ ggplot() +
 dat.dev <-
   dat.dev %>%
     mutate(predict_2029.dev = predict(Model6,. , type="response"))
-grid.arrange(
-  dat_infill %>%
-  ggplot() +  
-  geom_point(aes(x=xyC(dat_infill)[,1], y=xyC(dat_infill)[,2], colour = factor(ntile(predict_2029.infill,5)))) +
-  scale_colour_manual(values = palette5,
-                    labels=substr(quintileBreaks(dat_infill,"predict_2029.infill"),1,4),
-                    name="Quintile\nBreaks") +
-  geom_sf(data=studyAreaCounties, fill=NA, colour="black", size=1) +
-  labs(title= "Development Demand in 2029: Predicted Probabilities") +
-  mapTheme,
+
   
 dat.dev %>%
   ggplot() +  
@@ -1052,8 +1041,10 @@ dat.dev %>%
                     labels=substr(quintileBreaks(dat.dev,"predict_2029.dev"),1,4),
                     name="Quintile\nBreaks") +
   geom_sf(data=studyAreaCounties, fill=NA, colour="black", size=1) +
-  labs(title= "Supply-side in 2029: Predicted Probabilities") +
-  mapTheme,nrow=1)
+  labs(title= "Supply Side Scenario: \nNew Development") +
+  mapTheme+theme(legend.position ="bottom",
+                 legend.direction = "horizontal",
+                 legend.background = element_rect(fill='grey95', color = NA))
 ```
 
 

@@ -28,11 +28,12 @@ knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE)
 
 # Introduction
 
+
 This is a report to predict 2029 urban growth rate and patterns of Austin, TX.
 
-With the current upward rapid rise population and economic development rate, it is at most important to predict population increase in order to efficiently beforehand work towards planning allocation of resources, budgets and infrastructure. These predictions come very handy not only to planners, but also to residents, industries, economics locally but also outside of the region. These predictions not only help in planning urban growth abut also in prevention of urban growth.Urban growth is a spatial process which has a significant impact on the earth’s environment, which need to be tracked and predicted to not lead to urban sprawl into environmentally sensitive areas;  forests, wetlands, farmlands etc.
-For Planners, these predictions which can can be very useful to 
-Land use planning that is both economically productive and sustainable requires both supply and demand-side insights. Specifically, the Planner must understand future demand for development and how that demand contrasts with the supply of environmentally sensitive land. The goal of this chapter is to model this interplay.
+With the current upward rapid rise population and economic development rate, it is at most important to predict population increase in order to efficiently beforehand work towards planning allocation of resources, budgets and infrastructure.These predictions come very handy not only to planners, but also to residents, industries, economics locally but also outside of the region, above all a sustainable urban development. These predictions not only help in planning urban growth abut also in prevention of urban growth.Urban growth is a spatial process which has a significant impact on the earth’s environment, which need to be tracked and predicted to not lead to urban sprawl into environmentally sensitive areas;  forests, wetlands, farmlands etc.
+
+According to  Official Website of The City of Austin,TX is said be Forbes list of America's fasting growing cities, the third best city for good jobs, Third-fastest-growing tech job market along with being the most connected city, making it unquestionably attract people around the country, steady leading to rise in population growth. We are choosing this city as its already has seen a substantial growth but also will surely be a city that need to be explored as a priority given its current growth rates.
 
 ```{r load_packages, message=FALSE, warning=FALSE, results = "hide"}
 # install.packages("RCurl")
@@ -127,6 +128,16 @@ rast <- function(inRaster) {
 Our first step is to create a fishnet, which will act as our predictive surface. Each cell will hold values for our dependent and independent variables.
 
 ```{r fishnet_plot, warning = FALSE, message= FALSE}
+
+#austinMSA is the extent of the study area (Austing Metropolitan Statistical Area)
+studyAreaCounties<- c("Williamson", "Travis","Bastrop", "Caldwell", "Hays")
+
+austinMSA <- 
+  st_read('~/GitHub/Urban_Growth_ATX/Austin_Data/Austin_MSA.geojson')%>%
+  st_transform('ESRI:102741')%>%
+  filter(name %in%studyAreaCounties)%>%
+  st_union()
+
 austinMSA_fishnet <- 
   st_make_grid(st_sf(austinMSA), 4000) %>%
   st_sf()
@@ -145,19 +156,6 @@ ggplot() +
 ##  Land Cover 
 
 Our land cover data for Austin MSA is extracted from Google Earth Engine for the years 2009 - 2019. 
-
-```{r load_2009_lc, warning = FALSE, message = FALSE}
-
-#austinMSA is the extent of the study area (Austing Metropolitan Statistical Area)
-studyAreaCounties<- c("Williamson", "Travis","Bastrop", "Caldwell", "Hays")
-
-austinMSA <- 
-  st_read('~/GitHub/Urban_Growth_ATX/Austin_Data/Austin_MSA.geojson')%>%
-  st_transform('ESRI:102741')%>%
-  filter(name %in%studyAreaCounties)%>%
-  st_union()
-
-```
 
 ```{r load_2019_lc, warning = FALSE, message = FALSE}
 
@@ -589,7 +587,7 @@ dat <-
 
 # Exploratory Analysis
 
-
+Once our independent variables are joined with our fishnet into one data frame, we can begin to explore how they each relate to our dependent variable. First we explore our continuous variables: `highway_dist` and `lagDevelopment`. These plots tell us that fishnet cells that experience no new development change are associated with farther distances from highways and other development. This confirms our assumption and we can expect these variables to have reasonable predictive power. 
 
 ```{r, warning = FALSE, message = FALSE}
 dat %>%
@@ -605,6 +603,8 @@ dat %>%
     plotTheme 
 ```
 
+Next we plot our factor variables: `pop_2009`, `pop_2019` and `pop_Change`. We can see that new development occurred within the fishnet cells with the highest population in 2009 and 2019, and where population change the most between the two years. 
+
 ```{r, warning = FALSE, message = FALSE}
 dat %>%
   dplyr::select(pop_2009,pop_2019,pop_Change,lc_change) %>%
@@ -618,6 +618,7 @@ dat %>%
     labs(title="New Development as a Function of Factor Variables") +
     plotTheme
 ```
+Lastly, we examine the conversion rate of our land cover types to understand which undeveloped land saw the highest amount of development. Other undeveloped land which was classified from Barren Land, Dwarf Scrub and Grassland, saw the highest development at a conversion rate of almost 5% between 2009 and 2019.
 
 ```{r, warning = FALSE, message = FALSE}
 dat %>%
@@ -635,7 +636,7 @@ dat %>%
 
 # Building the Model
 
-### Modeling
+Finally, we begin the process of building a model to predict new development. We iterate 6 different logistic regression models using variations of variable combinations, and compare their R- squared statistic to decide which iteration has the best predictions. Model6 uses `wetlands` `forest` `farm` `oherUndeveloped` `lagDevelopment` `pop_Change` and `highway_dist` and results in an R- squared of .3. 
 
 ```{r, warning = FALSE, message = FALSE}
 set.seed(3456)
@@ -648,7 +649,7 @@ datTest  <- dat[-trainIndex,]
 
 ```
 
-```{r, warning = FALSE, message = FALSE, echo = FALSE}
+```{r, warning = FALSE, message = FALSE, echo = FALSE, results = 'hide'}
 Model1 <- glm(lc_change ~ wetlands + forest  + farm + otherUndeveloped, 
               family="binomial"(link="logit"), data = datTrain)
 
@@ -681,6 +682,9 @@ map_dfc(modelList, function(x)pR2(get(x)))[4,] %>%
     plotTheme
 ```
 
+
+The distribution of our predicted probabilities, plotted below, tells us that our model is excellent at predicting no change in land use, which logically makes sense given the high proportion of no development change in our dependent variable. This visual will help us determine our threshold to judge the goodness of our model via confusion matrix. 
+
 ```{r, warning = FALSE, message = FALSE}
 testSetProbs <- 
   data.frame(class = datTest$lc_change,
@@ -697,20 +701,9 @@ ggplot(testSetProbs, aes(probs)) +
 
 ### Accuracy
 
-Now to pick a predicted probability threshold to classify an area as having new development. Recall, *Sensitivity* or the True Positive rate is the proportion of actual positives (1’s) that were predicted to be positive. For example, the Sensitivity in our model is the rate of developed areas actually predicted as such. *Specificity* or True Negative Rate is the proportion of actual negatives (0’s) that were predicted to be negatives. For example, the Specificity in our model is the rate of No Change areas that were correctly predicted as No change.
-
-It is important to consider what Planners would typically optimize for given this use case. One approach is to maximize the number of 1’s predicted correctly (Sensitivity) so as to not under or over-predict new development. It may okay in this use case to incorrectly predict no change as changed (Specificity). An abundance of False Positive errors may be reasonable if Planners don’t mind over emphasizing development potential. It is important to remember that below this potential will evaluated alongside supply-side indicators such as the presence of sensitive land.
-
-There are some clear tradeoffs between Sensitivity and Specificity in our model that deserve some exploration. To illustrate, two different thresholds of 5% and 17% are explored. Predicted classes for both thresholds are generated and instead of using the `confusionMatrix` function from `caret` as we have in the past, here confusion matrix metrics are derived from the `yardstick` package. This allows us to `group_by` the threshold and `summarize` the metrics of interest.
-
-The `options` call below is required to tell `yardstick` that the positive factor class in `testSetProbs` is `1`. Without it, yardstick will by default, see the first factor level as `0` and flip the confusion metrics around.
-
-TN (Specificity) = predict no change - actual no change - we can ignore
-TP (Sensitivity) = predict change - actual change - good for us
-FN - predict no change - actual change = DO NOT WANT
-FP - predict change - actual no change = overplanning - could optimize 
-
-USE 5% THRESHOLD becuase it optimizes for True Positives (sensitivity) predicting change correctly 
+Sensitivity is the True Positive Rate. This is amount of fishnet cells that our model correctly predicted new development to occur. Specificity is the True Negative rate. Conversely, this is the amount of fishnet cells that our model correctly predicted no development to occur. Our errors are False Positive, or the amount of fishnet cells that our model incorrectly predicted development to occur, and False Negative, or the amount of fishnet cells that our model incorrectly predicted no development to occur. The implications of False Negative are that the City was unprepared for development in this area because they were not accounted for by the model. We are okay with False Positive, because the worst case scenario is over-planning.  
+  
+The plot below visualizes where our new development predictions occur based on a 17% threshold and a 5% threshold. We are looking for a higher Specificity in order to reduce our False Negative count. We optimize our model for our purposes by choosing the 17% threshold as a way to classify our predictions. This means that any fishnet cell with a predicted probability of higher than 17% will be classified as "New Development" and any cell below will be "no change".
 
 ```{r, warning = FALSE, message = FALSE}
 options(yardstick.event_first = FALSE)
@@ -726,14 +719,10 @@ testSetProbs %>%
   group_by(Variable) %>%
   summarize(Sensitivity = round(yardstick::sens_vec(class,factor(Value)),2),
             Specificity = round(yardstick::spec_vec(class,factor(Value)),2),
-            Accuracy = round(yardstick::accuracy_vec(class,factor(Value)),2)) %>% 
+            Accuracy = round(yardstick::accuracy_vec(class,factor(Value)),2)) %>%
   kable() %>%
   kable_styling(full_width = F)
 ```
-
-The 5% threshold correctly predicts a higher number of new development areas (Sensitivity), but incorrectly predicts a lower number of no change areas (Specificity). As there are far more no change areas in the data, this is reflected in a lower overall accuracy. Conversely, the 17% threshold has a lower Sensitivity rate and but a far higher Specificity rate. Again, because of the dataset is majority no change areas, this leads to a far higher Accuracy rate.
-
-Given the use case, and the spatial distribution of land cover change, it may be more useful to have a model that predicts generally where new development occurs rather than one that predicts precisely where. As illustrated below, the 17% threshold provides this outcome. These trade-offs can be visualized in the plot below. Here the model is used to predict for the entire `dat` dataset. Which threshold looks more reasonable given the distribution of observed development change?
 
 ```{r, warning = FALSE, message = FALSE}
 predsForMap <-         
@@ -756,8 +745,6 @@ ggplot() +
   mapTheme
 ```
 
-To provide a bit more insight, the code block below produces both true positives (Sensitivity) and true negatives (Specificity) for each grid cell by threshold type. Notice how the spatial pattern of Sensitivity for both thresholds is relatively consistent, but the 5% threshold misses most the study area with respect to Specificity.
-
 ```{r, warning = FALSE, message = FALSE}
 ConfusionMatrix.metrics <-
   dat %>%
@@ -774,16 +761,18 @@ ConfusionMatrix.metrics <-
 ```
 
 ```{r, warning = FALSE, message = FALSE, fig.height= 8, fig.width= 8 }
-ggplot(data=ConfusionMatrix.metrics) +
-  geom_point(aes(x=xyC(ConfusionMatrix.metrics)[,1], 
-                 y=xyC(ConfusionMatrix.metrics)[,2], colour = as.factor(Value))) +
-  facet_wrap(~Variable) +
-  scale_colour_manual(values = palette2, labels=c("Correct","Incorrect"),
-                       name="") +
-  labs(title="Development Predictions - Low Threshold") + mapTheme
+# ggplot(data=ConfusionMatrix.metrics) +
+#   geom_point(aes(x=xyC(ConfusionMatrix.metrics)[,1], 
+#                  y=xyC(ConfusionMatrix.metrics)[,2], colour = as.factor(Value))) +
+#   facet_wrap(~Variable) +
+#   scale_colour_manual(values = palette2, labels=c("Correct","Incorrect"),
+#                        name="") +
+#   labs(title="Development Predictions - Sensitivity & Specificity") + mapTheme
 ```
 
 ### Generalizability
+
+It is important that we check how our model generalizes across space. Our next step is to analyze how our model performs across the counties that lie within Austin MSA. Having set our 17% threshold, we output our confusion matrix statistics for each county. The Counties with higher the development change, like Williamson County, Sensitivity rates (True Positives) are comparable with the results from the test set results on the entire study area.
 
 ```{r, warning = FALSE, message = FALSE}
 spatialCV <- function(dataFrame, uniqueID, dependentVariable, modelName) {
@@ -828,17 +817,11 @@ endList <- list()
 }
 ```
 
-Now the function is run; a 17% predicted probability threshold is set and a facetted ROC plot for each county is created. It is important to note that Chambers, Austin, Waller, Liberty and San Jacinto each have ony between 1 and 13 grid cells that actually developed, so the below goodness of fit metrics are likely not useful.
-
 ```{r, warning = FALSE, message = FALSE}
 spatialCV_counties <-
   spatialCV(dat,"NAME","lc_change", Model6) %>%
   mutate(predClass = as.factor(ifelse(probs >= 0.17 ,1,0)))
 ```
-
-To investigate the across-county generalizability of the model, the code block below produces and maps confusion matrix statistics by county. It is important to ensure as above, that the `yardstick.event_first` option is set.
-
-Some interesting patterns emerge. First, results for those counties with little `Observed_Change` are not meaningful. In places with substantial new development, Sensitivity rates are comparable with the results from the test set results on the entire study area. Harris County which contains the City of Houston, has the greatest Sensitivity level, which is reasonable given it contains most of the development. Specificity is low across the board, because the model predicts an abundance of developed areas. Again, this is less of a concern because these estimates will be offset by sensitive land cover in Section 7 below. For the most part, these confusion matrix metrics suggest the model is generalizable to those counties that underwent significant development change.
 
 ```{r, warning = FALSE, message = FALSE}
 spatialCV_metrics <-
@@ -854,9 +837,13 @@ spatialCV_metrics %>%
   kable_styling(full_width = F)
 ```
 
-# Predicting for 2029 - Demand-side change
+# Planning Scenarios
 
-Now to update population change. A new data frame, `countyPopulation_2029` is created which includes 2019 population counts and 2029 projections for each county in the study area. Population is plotted by year and by county. Houston’s Travis County is projected to see the greatest population gains by far. Anecdotally, we know that much of Harris County is already developed, which suggests its development scenario will involve more ‘infill’ development then sprawl.
+Finally, we have a model that will allow us to predict future development in Austin, Texas. Below, we present two scenarios of Demand and Supply for which we forecast. 
+
+### Predicting for 2029 - Demand-side change
+
+The projected population growth of the Metropolitan Statistical Area of Austin Texas between 2019 and 2029 is 700,000. To predict for 2029, we apply this population growth proportionally across the counties within the MSA. The proportions are designated by the counts of observed change within each county, discussed in the generalizability section above. The results are such that Bastrop sees a 3% increase, Caldwell 4%, Hays 14%, Williamson 38% and Travis 41%. The plot below visualizes what this change looks like across counties.
 
 ```{r, warning = FALSE, message = FALSE}
 
@@ -879,14 +866,18 @@ dat <-
 # Hays County -	222,827 : prop - 10% : growth = 70000
 # total: 2173804
 
+# 2019 population by each county
+# Williamson County	- 320 : prop - 38% : growth + 266000 = 836437
+# Travis County	- 336 : prop - 41% : growth + 287000 = 1537884
+# Bastrop County -	26 : prop - 3% : growth + 21000 = 107839
+# Caldwell County -	32 : prop - 4% : growth + 28000 = 70817
+# Hays County -	125 : prop - 14% : growth + 98000 = 320827
+# total: 839
+
 countyPopulation_2029 <- 
-  data.frame(
-   NAME = 
-     c("Williamson", "Travis","Bastrop", "Caldwell", "Hays"),
-   county_projection_2029 = 
-     c(182000,406000,28000,14000,70000)) %>%
-   left_join(
-     dat %>%
+  data.frame(NAME = c("Williamson", "Travis","Bastrop", "Caldwell", "Hays"),
+   county_projection_2029 = c(836437,1537884,107839,70817,320827)) %>%
+   left_join( dat %>%
        st_set_geometry(NULL) %>%
        group_by(NAME) %>%
        summarize(county_population_2019 = round(sum(pop_2019))))
@@ -896,7 +887,7 @@ countyPopulation_2029 %>%
   ggplot(aes(reorder(NAME,-Value),Value)) +
   geom_bar(aes(fill=Variable), stat = "identity", position = "dodge") +
   scale_fill_manual(values = palette2,
-                    labels=c("2029","2019"),
+                    labels=c("2019","2029"),
                     name="Population") +
   labs(title="Population Change by County: 2019 - 2029",
        x="County", y="Population") +
@@ -904,7 +895,9 @@ countyPopulation_2029 %>%
   plotTheme
 ```
 
-```{r, warning = FALSE, message = FALSE}
+When we apply this population change to our data, and run a prediction with our model, we get the resulting predicted probabilities for development demand in 2029. The plot on the right sets a 17% threshold to our predicted probabilities, and we can say this is where we can reasonably expect new development, and where planners should allocate resources. 
+
+```{r, warning = FALSE, message = FALSE, fig.height = 6, fig.width = 10}
 dat_infill <-
   dat %>%
   #calculate population change
@@ -915,10 +908,11 @@ dat_infill <-
     dplyr::select(-county_projection_2029, -county_population_2019, 
                   -proportion_of_county_pop, -pop_2029.infill) %>%
   #predict for 2020
-    mutate(predict_2029.infill = predict(Model6,. , type="response"))
+    mutate(predict_2029.infill = predict(Model6,. , type="response"))%>%
+  mutate(pop_prediction = ifelse(predict_2029.infill > .17, 1, 0))
 
 # The map of predicted probabilities that results is best thought of as a measure of predicted development demand in 2029.
-
+grid.arrange(
 dat_infill %>%
   ggplot() +  
   geom_point(aes(x=xyC(dat_infill)[,1], y=xyC(dat_infill)[,2], colour = factor(ntile(predict_2029.infill,5)))) +
@@ -926,13 +920,29 @@ dat_infill %>%
                     labels=substr(quintileBreaks(dat_infill,"predict_2029.infill"),1,4),
                     name="Quintile\nBreaks") +
   geom_sf(data=studyAreaCounties, fill=NA, colour="black", size=1) +
-  labs(title= "Development Demand in 2029: Predicted Probabilities") +
-  mapTheme
+  labs(title= "2029: Demand-side Scenario: \nPopulation Increase", subtitle = "Predicted Probabilities") +
+  mapTheme+theme(legend.position ="bottom",
+                 legend.direction = "horizontal",
+                 legend.background = element_rect(fill='grey95', color = NA)),
+
+dat_infill %>%
+  ggplot() +  
+  geom_point(aes(x=xyC(dat_infill)[,1], y=xyC(dat_infill)[,2], colour = factor(pop_prediction))) +
+  scale_colour_manual(values = palette2,
+                     labels= c("No change", "New Development"),
+                    name="") +
+  geom_sf(data=studyAreaCounties, fill=NA, colour="black", size=1) +
+  labs(title="2029: Demand-side Scenario: \nPopulation Increase", subtitle = "17% Threshold") +
+  mapTheme+theme(legend.position ="bottom",
+                 legend.direction = "horizontal",
+                 legend.background = element_rect(fill='grey95', color = NA)), nrow = 1, widths = c(2,2.2))
 ```
 
-# Predicting for 2029 - Supply-side change
+### Predicting for 2029 - Supply-side change
 
-```{r newdev, warning = FALSE, message = FALSE}
+A new industrial area is developed in the center of Williamson County. This development brings dozens of new employers. How will this affect our predictions for 10 years in the future? 
+
+```{r newdev, warning = FALSE, message = FALSE, results = 'hide'}
 
 new_dev <- raster("~/GitHub/Urban_Growth_ATX/Austin_Data/new_dev.tif")
 
@@ -957,7 +967,7 @@ new_dev2 <- raster("~/GitHub/Urban_Growth_ATX/Austin_Data/new_dev2.tif")%>%
 #   mapTheme
 ```
 
-```{r}
+```{r  newdev2, warning = FALSE, message = FALSE}
 
 #join new development scenario to fishnet
 developed_29 <- new_dev2 == 1
@@ -969,26 +979,26 @@ developed_29_rast <-
   dplyr::select(developed_29)%>%
   mutate_if(is.numeric,as.factor)
 
-developed_29_rast %>%
-  gather(var,value,developed_29) %>%
-  st_cast("POLYGON") %>%    #just to make sure no weird geometries slipped in
-  mutate(X = xyC(.)$x,
-         Y = xyC(.)$y) %>%
-  ggplot() +
-    geom_sf(data=austinMSA) +
-    geom_point(aes(X,Y, colour=as.factor(value))) +
-  geom_sf(data = new_dev_shp, fill= NA, color = "red", size = 1)+
-    facet_wrap(~var) +
-    scale_colour_manual(values = palette2,
-                        labels=c("Other","Land Cover"),
-                        name = "") +
-    labs(title = "Land Cover Types, 2009",
-         subtitle = "As fishnet centroids") +
-   mapTheme
+# developed_29_rast %>%
+#   gather(var,value,developed_29) %>%
+#   st_cast("POLYGON") %>%    #just to make sure no weird geometries slipped in
+#   mutate(X = xyC(.)$x,
+#          Y = xyC(.)$y) %>%
+#   ggplot() +
+#     geom_sf(data=austinMSA) +
+#     geom_point(aes(X,Y, colour=as.factor(value))) +
+#   geom_sf(data = new_dev_shp, fill= NA, color = "red", size = 1)+
+#     facet_wrap(~var) +
+#     scale_colour_manual(values = palette2,
+#                         labels=c("Not Developed","Developed"),
+#                         name = "") +
+#     labs(title = "Proposed New Development, 2019",
+#          subtitle = "As fishnet centroids") +
+#    mapTheme
 
 ```
 
-```{r, warning = FALSE, message = FALSE}
+```{r rast1, warning = FALSE, message = FALSE}
 
 #update variables to be 2019 baseline - developed29 is our proposed new development 
 theRasterList19 <- c(developed_29,forest19,farm19,wetlands19,otherUndeveloped19,water19)
@@ -1018,7 +1028,9 @@ dat2 <-
 #    mapTheme
 ```
 
-```{r newdev2, warning = FALSE, message = FALSE}
+The industrial development is planned to fall on land classified as `otherUndeveloped` because, as we saw from our exploratory analysis, this land cover has the highest conversion rate. Williamson County has the second highest development change between 2009 and 2019, and the most available land. Below we plot the impact of this new development on our `developed` and `lagDevelopment` variables. 
+
+```{r newdev3, warning = FALSE, message = FALSE, fig.width = 10, fig.height = 6}
 
 #update lagDevelopment to reflect lag from new_dev
 dat2 <-
@@ -1055,13 +1067,17 @@ ggplot() +
                  legend.direction = "horizontal"), nrow = 1)
 ```
 
-```{r}
+When we apply this new development to our data, and run a prediction with our model, we get the resulting predicted probabilities for development demand in 2029 from supply-side change. The plot on the right sets a 17% threshold to our predicted probabilities, and we can say this is where we can reasonably expect new development, and where planners should allocate resources, given our new development plan. 
+
+```{r dat2, warning = FALSE, message = FALSE}
 
 dat2 <-
   dat2 %>%
     mutate(predict_2029.dev = predict(Model6,. , type="response"))%>%
   mutate(predProbs = ifelse(predict_2029.dev > .17, 1, 0))
-  
+
+
+grid.arrange(
 dat2 %>%
   ggplot() +  
   geom_point(aes(x=xyC(dat2)[,1], y=xyC(dat2)[,2], colour = factor(ntile(predict_2029.dev,5)))) +
@@ -1069,10 +1085,21 @@ dat2 %>%
                     labels=substr(quintileBreaks(dat2,"predict_2029.dev"),1,4),
                     name="Quintile\nBreaks") +
   geom_sf(data=studyAreaCounties, fill=NA, colour="black", size=1) +
-  labs(title= "Supply Side Scenario: \nNew Development") +
+  labs(title= "2029: Supply Side Scenario: \nNew Development", subtitle = "Predicted Probabilities") +
   mapTheme+theme(legend.position ="bottom",
                  legend.direction = "horizontal",
-                 legend.background = element_rect(fill='grey95', color = NA))
+                 legend.background = element_rect(fill='grey95', color = NA)),
+dat2 %>%
+  ggplot() +  
+  geom_point(aes(x=xyC(dat2)[,1], y=xyC(dat2)[,2], colour = factor(predProbs))) +
+  scale_colour_manual(values = palette2,
+                     labels= c("No change", "New Development"),
+                    name=" ") +
+  geom_sf(data=studyAreaCounties, fill=NA, colour="black", size=1) +
+  labs(title= "2029: Supply Side Scenario: \nNew Development", subtitle = "17% Threshold") +
+  mapTheme+theme(legend.position ="bottom",
+                 legend.direction = "horizontal",
+                 legend.background = element_rect(fill='grey95', color = NA)), nrow = 1)
 # 
 # dat2 %>%
 #   ggplot() +  
@@ -1084,6 +1111,12 @@ dat2 %>%
 #                  legend.direction = "horizontal",
 #                  legend.background = element_rect(fill='grey95', color = NA))
 ```
+
+# Conclusion
+
+### Planning Allocation
+
+For officials in Williamson County trying to manage the development demand for 2029 associated with the new industrial development, we highlight feasible development opportunities. First, we rule out development over sensitive land cover regions which are classified from wetlands and forest land cover. The plot below uses existing development and sensitive regions as a mask over our predicted probabilities of development within Williamson County. Dark blue fishnet cells are most likely to develop by 2029 and should be accounted for by Williamson planners and officials. 
 
 ```{r, warning = FALSE, message = FALSE, fig.height = 6, fig.width= 6}
 dat2 <-
@@ -1154,61 +1187,63 @@ county_specific_metrics <-
 ```
 
 ```{r, warning = FALSE, message = FALSE}
-county_specific_metrics %>%
-  gather(Variable, Value, -NAME, -geometry) %>%
-  mutate(Variable = factor(Variable, levels=c("Population_Change_Rate","Mean_Development_Demand",
-                                              "Total_Farmland","Total_Undeveloped","Total_Forest",
-                                              "Total_Wetlands","Sensitive_Land_Lost","Sensitive_Regions",
-                                              ordered = TRUE))) %>%
-  mutate(Planning_Designation = case_when(
-    Variable == "Population_Change_Rate" | Variable == "Mean_Development_Demand" ~ "Demand-Side",
-    Variable == "Total_Farmland" | Variable == "Total_Undeveloped"               ~ "Suitable",
-    TRUE                                                                         ~ "Not Suitable")) %>%
-  ggplot(aes(x=Variable, y=Value, fill=Planning_Designation)) +
-    geom_bar(stat="identity", position=position_dodge(), colour="black") +
-    facet_wrap(~NAME, ncol=5) +
-    coord_flip() +
-    scale_y_continuous(breaks = seq(.25, 1, by = .25)) +
-    geom_vline(xintercept = 2.5) + geom_vline(xintercept = 4.5) +
-    scale_fill_manual(values=c("black","red","darkgreen")) +
-    labs(title= "County Specific Allocation Metrics", subtitle= "As rates", x="Indicator", y="Rate") +
-    plotTheme + theme(axis.text.x = element_text(angle = 45, hjust = 1), legend.position="bottom")
+# county_specific_metrics %>%
+#   gather(Variable, Value, -NAME, -geometry) %>%
+#   mutate(Variable = factor(Variable, levels=c("Population_Change_Rate","Mean_Development_Demand",
+#                                               "Total_Farmland","Total_Undeveloped","Total_Forest",
+#                                               "Total_Wetlands","Sensitive_Land_Lost","Sensitive_Regions",
+#                                               ordered = TRUE))) %>%
+#   mutate(Planning_Designation = case_when(
+#     Variable == "Population_Change_Rate" | Variable == "Mean_Development_Demand" ~ "Demand-Side",
+#     Variable == "Total_Farmland" | Variable == "Total_Undeveloped"               ~ "Suitable",
+#     TRUE                                                                         ~ "Not Suitable")) %>%
+#   ggplot(aes(x=Variable, y=Value, fill=Planning_Designation)) +
+#     geom_bar(stat="identity", position=position_dodge(), colour="black") +
+#     facet_wrap(~NAME, ncol=5) +
+#     coord_flip() +
+#     scale_y_continuous(breaks = seq(.25, 1, by = .25)) +
+#     geom_vline(xintercept = 2.5) + geom_vline(xintercept = 4.5) +
+#     scale_fill_manual(values=c("black","red","darkgreen")) +
+#     labs(title= "County Specific Allocation Metrics", subtitle= "As rates", x="Indicator", y="Rate") +
+#     plotTheme + theme(axis.text.x = element_text(angle = 45, hjust = 1), legend.position="bottom")
 ```
 
 ```{r, warning = FALSE, message = FALSE, fig.height= 8, fig.width= 11}
-Travis <-
+
+Williamson <-
   dat2 %>%
     mutate(Development_Demand = predict(Model6, dat2, type="response")) %>%
-    filter(NAME == "Travis") 
+    filter(NAME == "Williamson") 
 
-Travis_landUse <- rbind(
-  filter(Travis, forest19 == 1 | wetlands19 == 1 ) %>%
+Williamson_landUse <- rbind(
+  filter(Williamson, forest19 == 1 | wetlands19 == 1 ) %>%
   dplyr::select() %>% mutate(Land_Use = "Not Suitable"),
-  filter(Travis, developed_29 == 1) %>%
+  filter(Williamson, developed_29 == 1) %>%
   dplyr::select() %>% mutate(Land_Use = "Developed"))
+
 
 grid.arrange(
 ggplot() +
-  geom_sf(data=Travis, aes(fill=factor(ntile(Development_Demand,5))), colour=NA) +
-  geom_point(data=Travis_landUse, aes(x=xyC(Travis_landUse)[,1], 
-                                        y=xyC(Travis_landUse)[,2], colour=Land_Use),
+  geom_sf(data=Williamson, aes(fill=factor(ntile(Development_Demand,5))), colour=NA) +
+  # geom_sf(data = austinMSA, color = "black", fill = NA)+
+  geom_point(data=Williamson_landUse, aes(x=xyC(Williamson_landUse)[,1], 
+                                        y=xyC(Williamson_landUse)[,2], colour=Land_Use),
                                         shape = 15, size = 1.5) +
-  geom_sf(data=st_intersection(austinHighways,filter(studyAreaCounties, NAME=="Travis")), size=1, color = "yellow") +
-  scale_fill_manual(values = palette5, name="Development\nDemand",
-                    labels=substr(quintileBreaks(Travis,"Development_Demand"),1,5)) +
-  scale_colour_manual(values = c("black","red")) + 
-  labs(title = "Development Potential, 2029: Fort Bend") + mapTheme +
+geom_sf(data=st_intersection(austinHighways,filter(studyAreaCounties, NAME=="Williamson")), size=1, color = "white") +  scale_fill_manual(values = palette5, name="Development\nDemand",
+                    labels=substr(quintileBreaks(Williamson,"Development_Demand"),1,5)) +
+  scale_colour_manual(values = c("black","grey85")) + 
+  labs(title = "Development Potential, 2029: Williamson") + mapTheme +
   guides(fill = guide_legend(order = 1), colour = guide_legend(order = 2)),
 
 ggplot() +
-  geom_sf(data=Travis, aes(fill=factor(ntile(pop_Change,5))), colour=NA) +
-  geom_point(data=Travis_landUse, aes(x=xyC(Travis_landUse)[,1], 
-                                        y=xyC(Travis_landUse)[,2], colour=Land_Use),
+  geom_sf(data=Williamson, aes(fill=factor(ntile(pop_Change,5))), colour=NA) +
+  # geom_sf(data = austinMSA, color = "black", fill = NA)+
+  geom_point(data=Williamson_landUse, aes(x=xyC(Williamson_landUse)[,1], 
+                                        y=xyC(Williamson_landUse)[,2], colour=Land_Use),
                                         shape = 15, size = 1.5) +
-  geom_sf(data=st_intersection(austinHighways,filter(studyAreaCounties, NAME=="Travis")), size=1, color = "yellow") +
-  scale_fill_manual(values = palette5, name="Population\nChange",
-                    labels=substr(quintileBreaks(Travis,"pop_Change"),1,5)) +
-  scale_colour_manual(values = c("black","red")) + 
-  labs(title = "Projected Population, 2029: Travis") + mapTheme +
+geom_sf(data=st_intersection(austinHighways,filter(studyAreaCounties, NAME=="Williamson")), size=1, color = "white") +   scale_fill_manual(values = palette5, name="Population\nChange",
+                    labels=substr(quintileBreaks(Williamson,"pop_Change"),1,5)) +
+  scale_colour_manual(values = c("black","grey85")) + 
+  labs(title = "Projected Population, 2029: Williamson") + mapTheme +
   guides(fill = guide_legend(order = 1), colour = guide_legend(order = 2)), ncol=2)
 ```
